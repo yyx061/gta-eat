@@ -101,6 +101,10 @@ a{color:var(--accent)}
 .chip{appearance:none;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:5px 13px;cursor:pointer;font-size:13px}
 .chip:hover{border-color:var(--ink)}
 .chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chip[data-st="no"]{background:var(--bad-soft);border-color:var(--bad);color:var(--bad);text-decoration:line-through;text-decoration-thickness:1.5px}
+.hint-yes,.hint-no{font-weight:500;border-radius:999px;padding:0 7px}
+.hint-yes{background:var(--accent);color:var(--accent-ink)}
+.hint-no{background:var(--bad-soft);color:var(--bad);text-decoration:line-through}
 .chip small{font-family:var(--mono);font-size:11px;opacity:.65;margin-left:5px}
 .chips.small .chip{padding:3px 10px;font-size:12px}
 
@@ -132,6 +136,7 @@ a{color:var(--accent)}
 
 /* ---------- 随便吃 ---------- */
 .moods{display:grid;gap:8px}
+.mood-groups{display:grid;gap:8px}
 .hint{font-size:13px;color:var(--muted)}
 .pick{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:28px 28px 24px;display:grid;gap:14px}
 .pick-walk{font-size:13px;color:var(--muted)}

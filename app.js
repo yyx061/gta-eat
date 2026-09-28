@@ -189,7 +189,9 @@ const RANK={ok:0,tight:1,soon:2,unk:3,closed:4};
 const visible=st=>S.show==='all'||['ok','tight','soon'].includes(st.k)||(S.show==='eat+unk'&&st.k==='unk');
 const row=(p,w0)=>{const d=dist(S.lat,S.lng,p.lat,p.lng), tm=tripMin(d);return {p,d,tm,st:statusOf(p,w0,tm)}};
 function matches(p,ids,q){
-  const tests=ids.map(kwTest).filter(Boolean);
+  // 带 ! 前缀的是「不想吃」：命中任何一个就排除，优先级最高
+  for(const id of ids) if(id[0]==='!'){const t=kwTest(id.slice(1));if(t&&t.test(p)) return false}
+  const tests=ids.filter(id=>id[0]!=='!').map(kwTest).filter(Boolean);
   const orT=tests.filter(t=>t.mode==='or'), andT=tests.filter(t=>t.mode==='and');
   if(orT.length&&!orT.some(t=>t.test(p))) return false;
   if(andT.length&&!andT.every(t=>t.test(p))) return false;
@@ -256,9 +258,9 @@ function renderControls(){
 }
 
 /* ---------- 随便吃 ---------- */
-const MOODS=[...KW[1].items.map(([n])=>'想吃点:'+n),'场景:快速解决','场景:坐下慢慢吃','场景:素食友好'];
+const MOOD_GROUPS=[['菜系',KW[0].items.map(([n])=>'菜系:'+n)],['想吃点',KW[1].items.map(([n])=>'想吃点:'+n)],['场景',['场景:快速解决','场景:坐下慢慢吃','场景:素食友好']]];
 function renderMoods(){
-  $('moods').innerHTML=MOODS.map(id=>`<button type="button" class="chip" data-mood="${esc(id)}" aria-pressed="${S.mood.includes(id)}">${esc(id.split(':')[1])}</button>`).join('');
+  $('moods').innerHTML=MOOD_GROUPS.map(([g,ids])=>`<div class="kg"><span class="lab">${g}</span><div class="chips">${ids.map(id=>`<button type="button" class="chip" data-mood="${esc(id)}" ${chipAttr(S.mood,id,id.split(':')[1])}>${esc(id.split(':')[1])}</button>`).join('')}</div></div>`).join('');
 }
 function roll(){
   if(!POOL.length){picked=null;return}
@@ -291,19 +293,23 @@ function renderPick(){
 /* ---------- 找一家 ---------- */
 function renderKW(){
   const cu=KW[0];
-  $('kw-main').innerHTML=cu.items.map(([n])=>{const id=cu.g+':'+n;return `<button type="button" class="chip" data-k="${esc(id)}" aria-pressed="${S.kw.includes(id)}">${esc(n)}</button>`}).join('')
-    +S.kw.filter(k=>k.startsWith('c:')).map(k=>`<button type="button" class="chip" data-k="${esc(k)}" aria-pressed="true">${esc(cz(k.slice(2)))} ✕</button>`).join('');
-  $('kw-more').innerHTML=KW.slice(1).map(g=>`<div class="kg"><span class="lab">${g.g}</span><div class="chips">${g.items.map(([n])=>{const id=g.g+':'+n;return `<button type="button" class="chip" data-k="${esc(id)}" aria-pressed="${S.kw.includes(id)}">${esc(n)}</button>`}).join('')}</div></div>`).join('');
-  const hidden=S.kw.filter(k=>!k.startsWith('菜系:')&&!k.startsWith('c:')).length;
+  $('kw-main').innerHTML=cu.items.map(([n])=>{const id=cu.g+':'+n;return `<button type="button" class="chip" data-k="${esc(id)}" ${chipAttr(S.kw,id,n)}>${esc(n)}</button>`}).join('')
+    +S.kw.filter(k=>k.replace(/^!/,'').startsWith('c:')).map(k=>{const id=k.replace(/^!/,''),n=cz(id.slice(2));return `<button type="button" class="chip" data-k="${esc(id)}" ${chipAttr(S.kw,id,n)}>${esc(n)}</button>`}).join('');
+  $('kw-more').innerHTML=KW.slice(1).map(g=>`<div class="kg"><span class="lab">${g.g}</span><div class="chips">${g.items.map(([n])=>{const id=g.g+':'+n;return `<button type="button" class="chip" data-k="${esc(id)}" ${chipAttr(S.kw,id,n)}>${esc(n)}</button>`}).join('')}</div></div>`).join('');
+  const hidden=S.kw.map(k=>k.replace(/^!/,'')).filter(k=>!k.startsWith('菜系:')&&!k.startsWith('c:')).length;
   $('more-kw').querySelector('summary').textContent=hidden?`更多条件（已选 ${hidden} 个）`:'更多条件';
 }
-function toggleKW(id){const i=S.kw.indexOf(id);if(i>=0)S.kw.splice(i,1);else S.kw.push(id);save();renderKW();limit=40;update()}
+// 标签三态：没选 → 想吃 → 不想吃 → 没选
+function cycle(arr,id){const i=arr.indexOf(id),j=arr.indexOf('!'+id);if(i>=0)arr[i]='!'+id;else if(j>=0)arr.splice(j,1);else arr.push(id)}
+const chipSt=(arr,id)=>arr.includes(id)?'yes':arr.includes('!'+id)?'no':'';
+const chipAttr=(arr,id,label)=>{const st=chipSt(arr,id);return `aria-pressed="${st==='yes'}" data-st="${st}"${st==='no'?` aria-label="不想吃 ${esc(label)}"`:''}`};
+function toggleKW(id){cycle(S.kw,id);save();renderKW();limit=40;update()}
 function renderNearby(){
   const cnt={}; NEAR.forEach(r=>{new Set(r.p.cu.map(cz)).forEach(z=>{cnt[z]=(cnt[z]||0)+1})});
   const top=Object.entries(cnt).sort((a,b)=>b[1]-a[1]).slice(0,18);
   $('nearby-h').innerHTML=`${M().l} ${S.mins} 分钟内${S.show==='all'?'':'这会儿'}有 <em>${Object.keys(cnt).length}</em> 种吃的，共 <em>${NEAR.length}</em> 家`;
   const rev={}; NEAR.forEach(r=>r.p.cu.forEach(c=>{rev[cz(c)]=rev[cz(c)]||c}));
-  $('nearby').innerHTML=top.length?top.map(([z,n])=>{const id='c:'+rev[z];return `<button type="button" class="chip" data-k="${esc(id)}" aria-pressed="${S.kw.includes(id)}">${esc(z)}<small>${n}</small></button>`}).join(''):'';
+  $('nearby').innerHTML=top.length?top.map(([z,n])=>{const id='c:'+rev[z];return `<button type="button" class="chip" data-k="${esc(id)}" ${chipAttr(S.kw,id,z)}>${esc(z)}<small>${n}</small></button>`}).join(''):'';
 }
 function card(r){
   const p=r.p, sel=selected===p.oid, ohSrc=overrides[p.oid]||p.oh||'';
@@ -540,7 +546,7 @@ document.addEventListener('click',e=>{
   const sg=e.target.closest('[data-sug]'); if(sg){useAddr(sugs[+sg.dataset.sug]);return}
   const rl=e.target.closest('[data-rl]'); if(rl){const r=LS.get('recentLocs',[])[+rl.dataset.rl];if(r)useAddr({main:r.n,lat:r.lat,lng:r.lng});return}
   const k=e.target.closest('[data-k]'); if(k){toggleKW(k.dataset.k);return}
-  const md=e.target.closest('[data-mood]'); if(md){const id=md.dataset.mood,i=S.mood.indexOf(id);i>=0?S.mood.splice(i,1):S.mood.push(id);save();renderMoods();compute();roll();renderPick();draw(false);return}
+  const md=e.target.closest('[data-mood]'); if(md){cycle(S.mood,md.dataset.mood);save();renderMoods();compute();roll();renderPick();draw(false);return}
   if(e.target.id==='reroll'){roll();renderPick();draw(false);return}
   if(e.target.id==='more'){limit+=40;renderList();return}
   const go=e.target.closest('[data-go]'); if(go){map.closePopup();if(S.view==='rand'){picked=go.dataset.go;renderPick();draw(false)}else select(go.dataset.go,true);return}

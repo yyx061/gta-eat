@@ -80,8 +80,8 @@
         <!-- 随便吃 -->
         <section class="view" id="view-rand" aria-labelledby="tab-rand">
           <div class="moods">
-            <span class="hint">想吃点什么？不选就完全随机</span>
-            <div class="chips" id="moods"></div>
+            <span class="hint">想吃点什么？点一下 <b class="hint-yes">想吃</b>，点两下 <b class="hint-no">不想吃</b>，不选就完全随机</span>
+            <div id="moods" class="mood-groups"></div>
           </div>
           <div id="pick"></div>
         </section>
@@ -92,6 +92,7 @@
             <input id="q" class="in grow" placeholder="搜店名、菜系、特色菜或街道，例如 ramen、Spadina、叉烧" aria-label="搜索">
             <button class="btn ghost" id="clear" type="button">清空条件</button>
           </div>
+          <span class="hint">点一下 <b class="hint-yes">想吃</b>，点两下 <b class="hint-no">不想吃</b></span>
           <div class="chips" id="kw-main"></div>
           <details class="more-kw" id="more-kw">
             <summary>更多条件</summary>
