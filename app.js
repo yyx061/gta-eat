@@ -21,7 +21,7 @@ const TYPE=['餐厅','快餐','咖啡馆','美食广场'];
 
 /* ---------- places ---------- */
 const DISH=window.DISH_DATA||{};
-const P=DATA.rows.map((r,i)=>({i,name:r[0],zh:r[1],lat:r[2],lng:r[3],type:r[4],cu:r[5].map(k=>CUI[k]),oh:r[6],addr:r[7],city:r[8],veg:r[9],take:r[10],web:r[11],oid:r[12],dish:DISH[r[12]]}));
+const P=DATA.rows.map((r,i)=>({i,name:r[0],zh:r[1],lat:r[2],lng:r[3],type:r[4],cu:r[5].map(k=>CUI[k]),oh:r[6],addr:r[7],city:r[8],veg:r[9],take:r[10],web:r[11],oid:r[12],phone:r[13]||'',src:r[14]||'o',ds:r[15]||'',dish:DISH[r[12]]}));
 let overrides=LS.get('oh',{});
 let favs=new Set(LS.get('favs',[]));
 
@@ -226,6 +226,11 @@ function dishHTML(p){
   return `<div class="dishes"><span class="lab">招牌</span>${p.dish.d.map(([a,b])=>`<span class="d"${b?` title="${esc(b)}"`:''}>${esc(a)}</span>`).join('')}<span class="src">${SRC[p.dish.s]||''}</span></div>`;
 }
 const tagHTML=p=>[...new Set(p.cu.map(cz))].slice(0,4).map(t=>`<span class="t">${esc(t)}</span>`).join('');
+const telHTML=p=>p.phone?`<a href="tel:${esc(p.phone.replace(/[^+\d]/g,''))}">📞 ${esc(p.phone.replace(/^\+1\s?/,''))}</a>`:'';
+function srcHTML(p){
+  const s=[p.src.includes('o')&&'OpenStreetMap',p.src.includes('v')&&'Overture',p.src.includes('d')&&'多伦多卫生检查'].filter(Boolean).join('、');
+  return `数据来源：${s}${p.ds?`（最近一次 ${esc(p.ds)}，说明还在营业）`:''}`;
+}
 function gmaps(p){return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent([p.name,p.addr,p.city||'Ontario'].filter(Boolean).join(' '))}`}
 function gdir(p){return `https://www.google.com/maps/dir/?api=1&origin=${S.lat},${S.lng}&destination=${p.lat},${p.lng}&travelmode=${M().g}`}
 
@@ -276,7 +281,7 @@ function renderPick(){
     <div class="pick-acts">
       <button class="btn primary" type="button" id="reroll">换一家</button>
       <a class="btn" href="${gdir(p)}" target="_blank" rel="noopener">就它了，导航 ↗</a>
-      <a class="btn ghost" href="${gmaps(p)}" target="_blank" rel="noopener">看 Google 评价 ↗</a>
+      <a class="btn ghost" href="${gmaps(p)}" target="_blank" rel="noopener">看 Google 评价 ↗</a>${r.st.k==='unk'&&p.phone?`<a class="btn ghost" href="tel:${esc(p.phone.replace(/[^+\d]/g,''))}">📞 打电话问营业时间</a>`:''}
       <button class="star" type="button" data-fav="${esc(p.oid)}" aria-pressed="${favs.has(p.oid)}" title="收藏">★</button>
     </div>
     <div class="pick-count">从 ${okN} 家${POOL[0]&&POOL[0].st.k==='ok'?'能吃上的':''}店里随机抽的</div>
@@ -311,7 +316,8 @@ function card(r){
     <div class="acts"><button class="star" type="button" data-fav="${esc(p.oid)}" aria-pressed="${favs.has(p.oid)}" title="收藏">★</button></div>
     <div class="more">
       <div>${esc([p.addr,p.city].filter(Boolean).join(', ')||'没有地址信息')}</div>
-      <div class="links"><a href="${gmaps(p)}" target="_blank" rel="noopener">Google 地图看评价 ↗</a><a href="${gdir(p)}" target="_blank" rel="noopener">${M().l}导航 ↗</a>${/^https?:/.test(p.web)?`<a href="${esc(p.web)}" target="_blank" rel="noopener">官网 ↗</a>`:''}</div>
+      <div class="links"><a href="${gmaps(p)}" target="_blank" rel="noopener">Google 地图看评价 ↗</a><a href="${gdir(p)}" target="_blank" rel="noopener">${M().l}导航 ↗</a>${/^https?:/.test(p.web)?`<a href="${esc(p.web)}" target="_blank" rel="noopener">官网 ↗</a>`:''}${telHTML(p)}</div>
+      <div>${srcHTML(p)}</div>
       <div class="ohedit"><input class="in" id="oh-${esc(p.oid)}" value="${esc(ohSrc)}" placeholder="补营业时间，如 Mo-Fr 11:00-22:00; Sa-Su 12:00-23:00"><button class="btn" type="button" data-oh="${esc(p.oid)}">保存时间</button>${overrides[p.oid]?`<button class="btn" type="button" data-ohx="${esc(p.oid)}">恢复原数据</button>`:''}</div>
     </div>
   </div>`;
@@ -329,10 +335,10 @@ function renderFav(){
 }
 function renderFoot(){
   const withH=P.filter(p=>p.oh).length, nChain=P.filter(p=>!p.oh&&p.ohChain).length, nd=Object.keys(DISH).length;
-  $('foot').innerHTML=`<p>店铺数据来自 © OpenStreetMap 贡献者（ODbL），${DATA.ts.slice(0,10)} 抓取，大多伦多地区共 ${P.length.toLocaleString()} 家餐厅、快餐和咖啡馆，其中 ${withH.toLocaleString()} 家（约 ${Math.round(withH/P.length*100)}%）登记了营业时间；另有 ${nChain.toLocaleString()} 家连锁分店按同名店最常见的营业时间推测（卡片上会注明），个别分店可能不同。</p>
+  $('foot').innerHTML=`<p>店铺数据合并自三个来源：OpenStreetMap（${DATA.ts.slice(0,10)} 抓取）、Overture Maps（${DATA.overture||''} 版，补充漏收的店、官网和电话）和多伦多市 DineSafe 卫生检查记录（补充近两年检查过的店）。大多伦多地区共 ${P.length.toLocaleString()} 家餐厅、快餐和咖啡馆，其中 ${withH.toLocaleString()} 家（约 ${Math.round(withH/P.length*100)}%）登记了营业时间；另有 ${nChain.toLocaleString()} 家连锁分店按同名店最常见的营业时间推测（卡片上会注明），个别分店可能不同。</p>
   <p>特色菜目前只有 ${nd} 家（试跑的唐人街和 King West）：「据官网菜单」是从店家官网提炼的，「AI 推测」和「据店名」可能不准。</p>
   <p>路程按直线距离估算：步行每分钟 80 米、骑车约 15 km/h、打车约 25 km/h 并加 4 分钟等车，没算红绿灯和堵车。餐厅按关门前 45 分钟、快餐和咖啡按 20 分钟算「来得及」。</p>
-  <p>营业时间以店家实际为准，出门前可点「Google 地图」核对。你补的营业时间、收藏和位置只保存在这个浏览器里。地图底图 © Esri。</p>`;
+  <p>营业时间以店家实际为准，出门前可点「Google 地图」核对。你补的营业时间、收藏和位置只保存在这个浏览器里。地图底图 © Esri。店铺数据 © OpenStreetMap 贡献者（ODbL）、© Overture Maps Foundation、Contains information licensed under the Open Government Licence – Toronto。</p>`;
 }
 
 /* ---------- map (Leaflet) ---------- */

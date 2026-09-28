@@ -4,3 +4,4 @@
 scripts/node_modules/
 scripts/out/
 backup-v1/
+scripts/.venv/
