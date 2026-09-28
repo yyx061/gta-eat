@@ -47,14 +47,19 @@
         <button type="button" class="tok" id="tok-when"></button>
       </p>
       <div class="pop" id="pop-loc" hidden>
+        <form class="addr" id="loc-form" autocomplete="off">
+          <label class="lab" for="loc-q">从哪里出发</label>
+          <div class="row">
+            <input id="loc-q" class="in grow" type="search" enterkeyhint="search" placeholder="输入地址、路口或地标，如 3300 Dufferin St、Union Station" aria-autocomplete="list" aria-controls="loc-sug">
+            <button class="btn primary" id="loc-go" type="submit">用这个地址</button>
+          </div>
+          <ul class="sug" id="loc-sug" role="listbox" hidden></ul>
+        </form>
+        <div class="chips small" id="loc-recent"></div>
         <div class="row">
           <select id="loc-preset" class="in" aria-label="选一个区域"></select>
           <button class="btn" id="pick-btn" type="button">在地图上点选</button>
-          <button class="btn primary" id="geo-btn" type="button">📍 用我现在的位置</button>
-        </div>
-        <div class="row">
-          <input id="loc-paste" class="in grow" placeholder="或粘贴坐标 / Google 地图链接，如 43.6532, -79.3832" aria-label="坐标">
-          <button class="btn" id="loc-go" type="button">定位</button>
+          <button class="btn" id="geo-btn" type="button">📍 用我现在的位置</button>
         </div>
         <div class="where" id="where"></div>
       </div>

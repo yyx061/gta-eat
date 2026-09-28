@@ -425,7 +425,7 @@ function select(oid,scroll){
   const r=[...RES,...FAV].find(x=>x.p.oid===oid); if(r&&selected&&!scroll) map.panTo([r.p.lat,r.p.lng]);
 }
 function closePops(){for(const id of ['loc','when']){$('pop-'+id).hidden=true;$('tok-'+id).setAttribute('aria-expanded','false')}}
-for(const id of ['loc','when']) $('tok-'+id).onclick=e=>{e.stopPropagation();const open=$('pop-'+id).hidden;closePops();if(open){$('pop-'+id).hidden=false;$('tok-'+id).setAttribute('aria-expanded','true')}};
+for(const id of ['loc','when']) $('tok-'+id).onclick=e=>{e.stopPropagation();const open=$('pop-'+id).hidden;closePops();if(open){$('pop-'+id).hidden=false;$('tok-'+id).setAttribute('aria-expanded','true');if(id==='loc'){renderRecent();setTimeout(()=>$('loc-q').focus(),0)}}};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){closePops();if(picking)setPicking(false)}});
 $('loc-preset').onchange=e=>{const h=HOODS[+e.target.value];if(h)setLoc(h[1],h[2],h[0]);e.target.value=''};
 function parseLoc(s){
@@ -434,12 +434,66 @@ function parseLoc(s){
   if(la<43.2||la>44.3||lo<-80.3||lo>-78.6) return 'far';
   return [la,lo];
 }
-$('loc-go').onclick=()=>{
-  const v=parseLoc($('loc-paste').value);
+/* ---------- 地址搜索：边输入边用 Photon 提示，回车时没有提示再问 Nominatim（都免 key，都基于 OpenStreetMap）---------- */
+const GTA_BOX='-79.95,43.40,-78.85,44.05';
+let sugs=[], sugCtl=null, sugTimer=null;
+const addrErr=m=>{$('where').querySelector('.err')?.remove();$('where').insertAdjacentHTML('beforeend',`<div class="err">${m}</div>`)};
+function photonLabel(p){
+  const street=[p.housenumber,p.street].filter(Boolean).join(' ');
+  const main=p.name||street||p.city||'';
+  const sub=[p.name&&street,p.district||p.locality,p.city,p.postcode].filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i&&x!==main).join(', ');
+  return {main,sub};
+}
+async function photon(q,signal){
+  const u=`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=5&lat=${S.lat}&lon=${S.lng}&bbox=${GTA_BOX}`;
+  const j=await (await fetch(u,{signal})).json();
+  return (j.features||[]).map(f=>{const {main,sub}=photonLabel(f.properties);return {lat:f.geometry.coordinates[1],lng:f.geometry.coordinates[0],main,sub}}).filter((x,i,a)=>x.main&&a.findIndex(y=>y.main===x.main&&y.sub===x.sub)===i);
+}
+async function nominatim(q){
+  const u=`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=jsonv2&limit=1&countrycodes=ca&viewbox=-79.95,44.05,-78.85,43.40&bounded=1&accept-language=zh,en`;
+  const j=await (await fetch(u)).json();
+  return j.map(x=>({lat:+x.lat,lng:+x.lon,main:x.name||x.display_name.split(',')[0],sub:x.display_name.split(',').slice(1,4).join(',')}));
+}
+function renderSugs(msg){
+  const ul=$('loc-sug');
+  if(!sugs.length&&!msg){ul.hidden=true;ul.innerHTML='';return}
+  ul.hidden=false;
+  ul.innerHTML=sugs.length?sugs.map((x,i)=>`<li><button type="button" role="option" data-sug="${i}" class="${i===0?'first':''}"><b>${esc(x.main)}</b>${x.sub?`<small>${esc(x.sub)}</small>`:''}</button></li>`).join(''):`<li class="none">${esc(msg)}</li>`;
+}
+function useAddr(x){
+  if(!inGTA(x.lat,x.lng)) return addrErr('这个地址不在大多伦多地区，目前只收录了 GTA 的店。');
+  const rec=[{n:x.main,lat:x.lat,lng:x.lng},...LS.get('recentLocs',[]).filter(r=>r.n!==x.main)].slice(0,5);
+  LS.set('recentLocs',rec);
+  $('loc-q').value=''; sugs=[]; renderSugs(); renderRecent();
+  setLoc(x.lat,x.lng,x.main);
+}
+function renderRecent(){
+  const rec=LS.get('recentLocs',[]);
+  $('loc-recent').innerHTML=rec.length?`<span class="lab">最近用过</span>`+rec.map((r,i)=>`<button type="button" class="chip" data-rl="${i}">${esc(r.n)}</button>`).join(''):'';
+}
+$('loc-q').oninput=e=>{
+  const q=e.target.value.trim(); clearTimeout(sugTimer); if(sugCtl) sugCtl.abort();
   $('where').querySelector('.err')?.remove();
-  if(!v){$('where').insertAdjacentHTML('beforeend','<div class="err">没认出坐标。在 Google 地图上右键点位置，复制第一行那串数字粘贴进来。</div>');return}
-  if(v==='far'){$('where').insertAdjacentHTML('beforeend','<div class="err">这个坐标不在大多伦多地区，目前只收录了 GTA 的店。</div>');return}
-  setLoc(v[0],v[1],'粘贴的坐标');$('loc-paste').value='';
+  if(q.length<3||parseLoc(q)){sugs=[];renderSugs();return}
+  sugTimer=setTimeout(async()=>{
+    sugCtl=new AbortController();
+    try{sugs=await photon(q,sugCtl.signal);renderSugs(sugs.length?'':'没有匹配的地址，按「用这个地址」再找一次')}
+    catch(err){if(err.name!=='AbortError'){sugs=[];renderSugs()}}
+  },300);
+};
+$('loc-form').onsubmit=async e=>{
+  e.preventDefault();
+  const q=$('loc-q').value.trim(); if(!q) return;
+  const v=parseLoc(q);  // 坐标或 Google 地图链接
+  if(v==='far') return addrErr('这个坐标不在大多伦多地区，目前只收录了 GTA 的店。');
+  if(v){$('loc-q').value='';return setLoc(v[0],v[1],'粘贴的坐标')}
+  if(sugs.length) return useAddr(sugs[0]);
+  const b=$('loc-go'); b.disabled=true; b.textContent='查找中…';
+  try{
+    let r=await photon(q); if(!r.length) r=await nominatim(q);
+    if(r.length) useAddr(r[0]); else addrErr('没找到这个地址。试试写成「门牌号 + 街名」，或者路口，如 Yonge & Bloor。');
+  }catch(err){addrErr('查地址需要联网，现在连不上。可以先选一个区域，或者在地图上点选。')}
+  b.disabled=false; b.textContent='用这个地址';
 };
 // 定位：持续读几秒，等 GPS 收敛。精度到 GOOD 米以内立即采用，否则最多等 MAXWAIT 毫秒取最准的一次
 const GEO={GOOD:35,MAXWAIT:10000,BAD:1000};
@@ -475,7 +529,6 @@ $('geo-btn').onclick=()=>{
   },{enableHighAccuracy:true,maximumAge:0,timeout:GEO.MAXWAIT});
   timer=setTimeout(finish,GEO.MAXWAIT);
 };
-$('loc-paste').onkeydown=e=>{if(e.key==='Enter')$('loc-go').click()};
 $('when-day').onchange=e=>{S.whenDay=+e.target.value;save();update()};
 $('when-time').onchange=e=>{S.whenTime=e.target.value||'18:30';save();update()};
 let qt=null;$('q').value=S.q;$('q').oninput=e=>{clearTimeout(qt);qt=setTimeout(()=>{S.q=e.target.value;limit=40;update()},150)};
@@ -484,6 +537,8 @@ $('about-btn').onclick=()=>$('about').showModal();
 document.querySelector('.tabs').onclick=e=>{const t=e.target.closest('[data-view]');if(t)setView(t.dataset.view)};
 document.addEventListener('click',e=>{
   if(!e.target.closest('.pop,.tok')) closePops();
+  const sg=e.target.closest('[data-sug]'); if(sg){useAddr(sugs[+sg.dataset.sug]);return}
+  const rl=e.target.closest('[data-rl]'); if(rl){const r=LS.get('recentLocs',[])[+rl.dataset.rl];if(r)useAddr({main:r.n,lat:r.lat,lng:r.lng});return}
   const k=e.target.closest('[data-k]'); if(k){toggleKW(k.dataset.k);return}
   const md=e.target.closest('[data-mood]'); if(md){const id=md.dataset.mood,i=S.mood.indexOf(id);i>=0?S.mood.splice(i,1):S.mood.push(id);save();renderMoods();compute();roll();renderPick();draw(false);return}
   if(e.target.id==='reroll'){roll();renderPick();draw(false);return}
