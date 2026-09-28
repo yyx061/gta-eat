@@ -1,0 +1,8 @@
+{
+  "name": "gta-eat-scripts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "unpdf": "^1.8.1"
+  }
+}
