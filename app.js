@@ -111,7 +111,7 @@ const S=Object.assign({lat:43.6532,lng:-79.3832,locName:'市政厅附近',when:'
 S.kw=S.kw||[]; S.mood=S.mood||[];
 if(S.walk&&!LS.get('state',{}).mins) S.mins=S.walk; // 旧版只有步行分钟数
 if(!['rand','find','fav'].includes(S.view)) S.view='rand';
-const save=()=>LS.set('state',{lat:S.lat,lng:S.lng,locName:S.locName,mode:S.mode,mins:S.mins,view:S.view,show:S.show,sort:S.sort,kw:S.kw,mood:S.mood,when:S.when,whenDay:S.whenDay,whenTime:S.whenTime});
+const save=()=>LS.set('state',{lat:S.lat,lng:S.lng,locName:S.locName,mode:S.mode,mins:S.mins,view:S.view,show:S.show,sort:S.sort,kw:S.kw,mood:S.mood,acc:S.acc,when:S.when,whenDay:S.whenDay,whenTime:S.whenTime});
 
 /* ---------- keyword library ---------- */
 const has=(p,list)=>p.cu.some(c=>list.includes(c));
@@ -221,7 +221,7 @@ function renderQuery(){
   $('tok-when').textContent=S.when==='now'?'现在':`${S.whenDay==0?'今天':S.whenDay==1?'明天':DN[Math.floor(w/1440)]} ${hhmm(w)}`;
   radios($('mode-seg'),Object.entries(MODES).map(([k,m])=>[k,`${m.ico} ${m.l}`]),S.mode,v=>{S.mode=v;save();limit=40;update(true)});
   radios($('mins-seg'),MINS.map(n=>[n,n]),S.mins,v=>{S.mins=+v;save();limit=40;update(true)});
-  $('where').innerHTML=`当前出发点：<b>${esc(S.locName)}</b> <span class="num">${S.lat.toFixed(4)}, ${S.lng.toFixed(4)}</span>`;
+  $('where').innerHTML=`当前出发点：<b>${esc(S.locName)}</b> <span class="num">${S.lat.toFixed(4)}, ${S.lng.toFixed(4)}</span>${S.acc?` · 精度约 ±<span class="num">${Math.round(S.acc)}</span> 米`:''}`;
 }
 function renderClock(){const n=torontoNow();$('clock').innerHTML=`多伦多 ${DN[n.dow]} <b>${hhmm(n.min)}</b>`}
 function renderControls(){
@@ -337,7 +337,7 @@ setTiles();
 const cssv=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const COL={ok:'--ok',tight:'--warn',soon:'--warn',closed:'--bad',unk:'--unk'};
 const dots=L.layerGroup().addTo(map);
-let ring=null, me=null, picking=false;
+let ring=null, me=null, accRing=null, picking=false;
 function fitRange(){if(ring&&maxDist()>0)map.fitBounds(ring.getBounds(),{padding:[16,16]});else map.setView([S.lat,S.lng],15)}
 function popHTML(r){
   const p=r.p;
@@ -351,6 +351,8 @@ function draw(fit){
   const surf=cssv('--surface'), acc=cssv('--accent');
   if(ring) map.removeLayer(ring);
   ring=L.circle([S.lat,S.lng],{radius:Math.max(maxDist(),1),color:cssv('--ink'),weight:1.5,opacity:.55,dashArray:'6 6',fill:true,fillOpacity:.04,interactive:false}).addTo(map);
+  if(accRing) map.removeLayer(accRing);
+  accRing=S.acc?L.circle([S.lat,S.lng],{radius:S.acc,color:cssv('--me'),weight:1,opacity:.8,fillColor:cssv('--me'),fillOpacity:.15,interactive:false}).addTo(map):null;
   if(me) map.removeLayer(me);
   me=L.marker([S.lat,S.lng],{icon:L.divIcon({className:'',html:'<div class="me-pin"></div>',iconSize:[18,18],iconAnchor:[9,9]}),keyboard:false,interactive:false,zIndexOffset:1000}).addTo(map);
   dots.clearLayers();
@@ -390,7 +392,7 @@ function update(fit){
 }
 
 /* ---------- interactions ---------- */
-function setLoc(lat,lng,name){S.lat=+lat;S.lng=+lng;S.locName=name;save();limit=40;picked=null;selected=null;closePops();update(true)}
+function setLoc(lat,lng,name,acc){S.lat=+lat;S.lng=+lng;S.locName=name;S.acc=acc||null;save();limit=40;picked=null;selected=null;closePops();update(true)}
 function select(oid,scroll){
   selected=selected===oid&&!scroll?null:oid;
   if(scroll){const idx=RES.findIndex(x=>x.p.oid===oid);if(idx>=limit){limit=idx+10}}
@@ -415,17 +417,39 @@ $('loc-go').onclick=()=>{
   if(v==='far'){$('where').insertAdjacentHTML('beforeend','<div class="err">这个坐标不在大多伦多地区，目前只收录了 GTA 的店。</div>');return}
   setLoc(v[0],v[1],'粘贴的坐标');$('loc-paste').value='';
 };
+// 定位：持续读几秒，等 GPS 收敛。精度到 GOOD 米以内立即采用，否则最多等 MAXWAIT 毫秒取最准的一次
+const GEO={GOOD:35,MAXWAIT:10000,BAD:1000};
+const inGTA=(la,lo)=>!(la<43.2||la>44.3||lo<-80.3||lo>-78.6);
+let geoWatch=null;
+function geoMsg(html){$('where').querySelector('.err')?.remove();$('where').insertAdjacentHTML('beforeend',`<div class="err">${html}</div>`)}
 $('geo-btn').onclick=()=>{
-  const b=$('geo-btn'); $('where').querySelector('.err')?.remove();
-  const fail=m=>{b.disabled=false;b.textContent='📍 用我现在的位置';$('where').insertAdjacentHTML('beforeend',`<div class="err">${m}</div>`)};
-  if(!navigator.geolocation) return fail('这个浏览器不支持定位。');
+  const b=$('geo-btn'), label='📍 用我现在的位置';
+  if(geoWatch!==null) return;
+  $('where').querySelector('.err')?.remove();
+  if(!navigator.geolocation) return geoMsg('这个浏览器不支持定位。');
+  let best=null, timer=null;
+  const stop=()=>{navigator.geolocation.clearWatch(geoWatch);geoWatch=null;clearTimeout(timer);b.disabled=false;b.textContent=label};
+  const finish=()=>{
+    stop();
+    if(!best) return geoMsg('没拿到位置，稍后再试，或者选一个区域。');
+    const {latitude:la,longitude:lo,accuracy:acc}=best.coords;
+    if(!inGTA(la,lo)) return geoMsg('你现在不在大多伦多地区，目前只收录了 GTA 的店。');
+    setLoc(la,lo,'我现在的位置',acc);
+    if(acc>GEO.BAD){ // 很可能关了「精确位置」，把弹框留着显示提示
+      $('pop-loc').hidden=false;$('tok-loc').setAttribute('aria-expanded','true');
+      geoMsg(`定位误差约 ${(acc/1000).toFixed(1)} 公里，很可能没开「精确位置」：iPhone「设置 → 隐私与安全性 → 定位服务 → Safari 网站」里打开「精确位置」。也可以点「在地图上点选」手动定准。`);
+    }
+  };
   b.disabled=true; b.textContent='定位中…';
-  navigator.geolocation.getCurrentPosition(pos=>{
-    b.disabled=false; b.textContent='📍 用我现在的位置';
-    const {latitude:la,longitude:lo}=pos.coords;
-    if(la<43.2||la>44.3||lo<-80.3||lo>-78.6) return fail('你现在不在大多伦多地区，目前只收录了 GTA 的店。');
-    setLoc(la,lo,'我现在的位置');
-  },e=>fail(e.code===1?'没有定位权限：在 iPhone「设置 → 隐私与安全性 → 定位服务」里允许 Safari 网站定位。':'没拿到位置，稍后再试，或者选一个区域。'),{enableHighAccuracy:true,timeout:12000,maximumAge:60000});
+  geoWatch=navigator.geolocation.watchPosition(pos=>{
+    if(!best||pos.coords.accuracy<best.coords.accuracy) best=pos;
+    b.textContent=`定位中… ±${Math.round(best.coords.accuracy)} 米`;
+    if(best.coords.accuracy<=GEO.GOOD) finish();
+  },e=>{
+    if(e.code===1){stop();return geoMsg('没有定位权限：在 iPhone「设置 → 隐私与安全性 → 定位服务 → Safari 网站」里选「使用 App 期间」，并打开「精确位置」。')}
+    if(e.code!==3&&!best){stop();geoMsg('没拿到位置，稍后再试，或者选一个区域。')}
+  },{enableHighAccuracy:true,maximumAge:0,timeout:GEO.MAXWAIT});
+  timer=setTimeout(finish,GEO.MAXWAIT);
 };
 $('loc-paste').onkeydown=e=>{if(e.key==='Enter')$('loc-go').click()};
 $('when-day').onchange=e=>{S.whenDay=+e.target.value;save();update()};

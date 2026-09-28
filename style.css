@@ -66,7 +66,7 @@ a{color:var(--accent)}
 .modes button:hover,.mins button:hover{color:var(--ink)}
 .modes button[aria-checked="true"],.mins button[aria-checked="true"]{background:var(--ink);color:var(--surface)}
 .mins button{font-family:var(--mono);padding-inline:9px}
-.pop{position:absolute;z-index:1000;top:100%;left:0;margin-top:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px;display:grid;gap:8px;width:min(560px,100%);box-shadow:0 12px 32px -12px rgba(23,32,28,.35)}
+.pop{position:absolute;z-index:1050;top:100%;left:0;margin-top:6px;background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px;display:grid;gap:8px;width:min(560px,100%);box-shadow:0 12px 32px -12px rgba(23,32,28,.35)}
 
 /* ---------- 通用控件 ---------- */
 .row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
