@@ -36,3 +36,9 @@ node scripts/build-dish-data.mjs
 ```
 有官网的店读官网菜单（含 PDF，JS 网站用本机 Chrome 渲染），没有的再问 DeepSeek 或按店名推断，网页上会标明来源。
 地图底图来自 Esri（免 key），需要联网。
+
+## 手机上用（PWA）
+网址：https://yyx061.github.io/gta-eat/ （GitHub Pages，仓库 yyx061/gta-eat）
+- iPhone：用 Safari 打开 → 分享 → 「添加到主屏幕」。
+- 改完代码后 `git add -A && git commit -m "…" && git push`，一两分钟后生效；手机上的 App 下次联网打开时自动更新。
+- 如果改动后手机上一直不更新，把 `sw.js` 里的 `VERSION` 加一再推送。
