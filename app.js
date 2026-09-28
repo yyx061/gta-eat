@@ -75,11 +75,25 @@ function parseOH(str){
 }
 const schedCache=new Map();
 function sched(p){
-  const src=overrides[p.oid]||p.oh;
+  const src=overrides[p.oid]||p.oh||p.ohChain;
   const key=p.i+'|'+src;
   if(!schedCache.has(key)) schedCache.set(key,parseOH(src));
   return schedCache.get(key);
 }
+/* 连锁店推测：同名店 ≥3 家、其中 ≥2 家有营业时间时，给没登记的分店套用最常见的那份 */
+const normName=s=>s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g,'');
+(function(){
+  const g={}; for(const p of P){const k=normName(p.name);if(k)(g[k]=g[k]||[]).push(p)}
+  for(const list of Object.values(g)){
+    if(list.length<3) continue;
+    const c={}; let n=0;
+    for(const p of list) if(p.oh&&parseOH(p.oh)){c[p.oh]=(c[p.oh]||0)+1;n++}
+    if(n<2) continue;
+    const best=Object.entries(c).sort((a,b)=>b[1]-a[1])[0][0];
+    for(const p of list) if(!p.oh) p.ohChain=best;
+  }
+})();
+const isGuess=p=>!overrides[p.oid]&&!p.oh&&!!p.ohChain;
 function openAt(iv,w){for(const [a,b] of iv){if(a<=w&&w<b)return b-w;if(a<=w+10080&&w+10080<b)return b-w-10080}return -1}
 function nextOpen(iv,w){let best=null;for(const [a] of iv){const d=((a-w)%10080+10080)%10080;if(d>0&&(best===null||d<best))best=d}return best}
 const hhmm=m=>{m=((m%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')};
@@ -170,9 +184,10 @@ function status(p,w0,tm){
   const at=w+nx, day=Math.floor((at%10080)/1440), sameDay=Math.floor(w/1440)===Math.floor(at/1440)&&nx<1440;
   return {k:'closed',t:`到时已关门 · ${sameDay?'今天':DN[day]} ${hhmm(at)} 开`};
 }
+const statusOf=(p,w0,tm)=>{const st=status(p,w0,tm);if(st.k!=='unk'&&isGuess(p))st.t+=' · 按连锁店推测';return st};
 const RANK={ok:0,tight:1,soon:2,unk:3,closed:4};
 const visible=st=>S.show==='all'||['ok','tight','soon'].includes(st.k)||(S.show==='eat+unk'&&st.k==='unk');
-const row=(p,w0)=>{const d=dist(S.lat,S.lng,p.lat,p.lng), tm=tripMin(d);return {p,d,tm,st:status(p,w0,tm)}};
+const row=(p,w0)=>{const d=dist(S.lat,S.lng,p.lat,p.lng), tm=tripMin(d);return {p,d,tm,st:statusOf(p,w0,tm)}};
 function matches(p,ids,q){
   const tests=ids.map(kwTest).filter(Boolean);
   const orT=tests.filter(t=>t.mode==='or'), andT=tests.filter(t=>t.mode==='and');
@@ -313,8 +328,8 @@ function renderFav(){
   $('fav-cards').innerHTML=FAV.length?FAV.map(card).join(''):`<div class="empty">还没有收藏。在店铺卡片上点 ★ 就会出现在这里。</div>`;
 }
 function renderFoot(){
-  const withH=P.filter(p=>p.oh).length, nd=Object.keys(DISH).length;
-  $('foot').innerHTML=`<p>店铺数据来自 © OpenStreetMap 贡献者（ODbL），${DATA.ts.slice(0,10)} 抓取，大多伦多地区共 ${P.length.toLocaleString()} 家餐厅、快餐和咖啡馆，其中 ${withH.toLocaleString()} 家（约 ${Math.round(withH/P.length*100)}%）登记了营业时间。</p>
+  const withH=P.filter(p=>p.oh).length, nChain=P.filter(p=>!p.oh&&p.ohChain).length, nd=Object.keys(DISH).length;
+  $('foot').innerHTML=`<p>店铺数据来自 © OpenStreetMap 贡献者（ODbL），${DATA.ts.slice(0,10)} 抓取，大多伦多地区共 ${P.length.toLocaleString()} 家餐厅、快餐和咖啡馆，其中 ${withH.toLocaleString()} 家（约 ${Math.round(withH/P.length*100)}%）登记了营业时间；另有 ${nChain.toLocaleString()} 家连锁分店按同名店最常见的营业时间推测（卡片上会注明），个别分店可能不同。</p>
   <p>特色菜目前只有 ${nd} 家（试跑的唐人街和 King West）：「据官网菜单」是从店家官网提炼的，「AI 推测」和「据店名」可能不准。</p>
   <p>路程按直线距离估算：步行每分钟 80 米、骑车约 15 km/h、打车约 25 km/h 并加 4 分钟等车，没算红绿灯和堵车。餐厅按关门前 45 分钟、快餐和咖啡按 20 分钟算「来得及」。</p>
   <p>营业时间以店家实际为准，出门前可点「Google 地图」核对。你补的营业时间、收藏和位置只保存在这个浏览器里。地图底图 © Esri。</p>`;
@@ -361,7 +376,10 @@ function draw(fit){
   let hiRow=null;
   for(const r of list.slice(0,3000)){
     if(r.p.oid===hi){hiRow=r;continue}
-    L.circleMarker([r.p.lat,r.p.lng],{radius:S.view==='rand'?4:5.5,color:surf,weight:1,fillColor:cols[r.st.k],fillOpacity:S.view==='rand'?.45:.95}).bindPopup(()=>popHTML(r)).addTo(dots);
+    const o=r.st.k==='unk' // 时间未知：小空心圈，不抢眼
+      ?{radius:3.5,color:cols.unk,weight:1.5,opacity:S.view==='rand'?.5:.8,fill:true,fillColor:surf,fillOpacity:.6}
+      :{radius:S.view==='rand'?4:5.5,color:surf,weight:1,fillColor:cols[r.st.k],fillOpacity:S.view==='rand'?.45:.95};
+    L.circleMarker([r.p.lat,r.p.lng],o).bindPopup(()=>popHTML(r)).addTo(dots);
   }
   if(hiRow){
     const m=L.circleMarker([hiRow.p.lat,hiRow.p.lng],{radius:10,color:acc,weight:3,fillColor:cols[hiRow.st.k],fillOpacity:1}).bindPopup(()=>popHTML(hiRow)).addTo(dots);
