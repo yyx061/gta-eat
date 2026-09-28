@@ -5,13 +5,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFile } from 'node:child_process';
+import { page, links, MENU_LINK } from './lib/web.mjs';
+import { ask as dsAsk } from './lib/deepseek.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
-try { process.loadEnvFile(path.join(ROOT, '.env')); } catch {}
-const KEY = process.env.DEEPSEEK_API_KEY;
-if (!KEY) { console.error('缺少 DEEPSEEK_API_KEY：请在项目根目录的 .env 里写 DEEPSEEK_API_KEY=你的key'); process.exit(1); }
-
 const [lat0 = 43.6529, lng0 = -79.3980, radiusKm = 1.5, count = 40] = process.argv.slice(2).map(Number);
 
 global.window = {};
@@ -29,94 +26,18 @@ const shops = D.rows
   .sort((a, b) => a.d - b.d)
   .slice(0, count);
 
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128 Safari/537.36';
-
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-
-async function get(url) {
-  const res = await fetch(url, { headers: { 'user-agent': UA, 'accept-language': 'en,zh;q=0.8' }, signal: AbortSignal.timeout(15000), redirect: 'follow' });
-  if (!res.ok) throw new Error('HTTP ' + res.status);
-  if (/pdf/i.test(res.headers.get('content-type') || '')) return { pdf: await pdfText(await res.arrayBuffer()), url: res.url };
-  return { html: await res.text(), url: res.url };
-}
-
-async function pdfText(buf) {
-  const { extractText, getDocumentProxy } = await import('unpdf');
-  const { text } = await extractText(await getDocumentProxy(new Uint8Array(buf)), { mergePages: true });
-  return text.replace(/\s+/g, ' ').trim();
-}
-
-// 用无头 Chrome 渲染 JS 生成的页面（Wix、Squarespace、点餐平台等）
-function render(url) {
-  return new Promise(resolve => {
-    execFile(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--hide-scrollbars', `--user-agent=${UA}`, '--virtual-time-budget=8000', '--dump-dom', url],
-      { timeout: 40000, maxBuffer: 30 << 20 }, (err, out) => resolve(err ? '' : out));
-  });
-}
-
-function htmlText(html) {
-  return html
-    .replace(/<(script|style|noscript|svg)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&#39;|&rsquo;/g, "'").replace(/&quot;/g, '"')
-    .replace(/\s+/g, ' ').trim();
-}
-
-// 菜单链接：同站页面、PDF，或外部点餐/菜单平台
-const MENU_HOSTS = /toasttab|square\.site|squareup|clover|menufy|popmenu|bentobox|singleplatform|allmenus|ubereats|doordash|skipthedishes|ritual|tock|opentable|resy/i;
-function menuLinks(html, base) {
-  const out = new Set();
-  for (const m of html.matchAll(/<a\b[^>]*href=["']([^"'#]+)["'][^>]*>([\s\S]*?)<\/a>/gi)) {
-    const [, href, label] = m;
-    if (!/menu|food|dishes|dinner|lunch|菜单/i.test(href + ' ' + htmlText(label))) continue;
-    try {
-      const u = new URL(href, base);
-      if (!/^https?:$/.test(u.protocol) || /\.(jpe?g|png|webp|gif)$/i.test(u.pathname)) continue;
-      if (u.host === new URL(base).host || /\.pdf$/i.test(u.pathname) || MENU_HOSTS.test(u.host)) out.add(u.href.replace(/\/$/, ''));
-    } catch {}
-  }
-  out.delete(base.replace(/\/$/, ''));
-  return [...out].slice(0, 3);
-}
-
-// 先直接抓；文字太少说明是 JS 渲染的，再交给 Chrome。菜单页（force）一律渲染，菜品常是 JS 加载的
-async function page(url, force) {
-  const r = await get(url);
-  if (r.pdf != null) return { text: r.pdf, html: '', url: r.url };
-  if (!force && htmlText(r.html).length >= 600) return { text: htmlText(r.html), html: r.html, url: r.url };
-  const dom = await render(r.url);
-  return dom ? { text: htmlText(dom), html: dom, url: r.url, rendered: true } : { text: htmlText(r.html), html: r.html, url: r.url };
-}
-
 async function siteText(web) {
   const url = /^https?:/i.test(web) ? web : 'https://' + web;
   const home = await page(url);
   let text = home.text.slice(0, 6000), menus = 0;
-  for (const link of menuLinks(home.html, home.url)) {
+  for (const link of links(home.html, home.url, MENU_LINK)) {
     try { const m = await page(link, true); if (m.text) { text += '\n[MENU] ' + m.text.slice(0, 6000); menus++; } } catch {}
   }
   return { text: text.slice(0, 20000), menus, rendered: !!home.rendered };
 }
 
-async function ask(prompt) {
-  const res = await fetch('https://api.deepseek.com/chat/completions', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + KEY },
-    body: JSON.stringify({
-      model: 'deepseek-chat',
-      temperature: 0.2,
-      response_format: { type: 'json_object' },
-      messages: [
-        { role: 'system', content: '你是多伦多餐馆点评助手。只输出 JSON：{"dishes":[{"zh":"中文菜名","en":"原文菜名"}],"note":"一句话说明依据"}。最多 3 道菜，按推荐程度排序。没有把握就返回空数组，绝不编造。' },
-        { role: 'user', content: prompt },
-      ],
-    }),
-    signal: AbortSignal.timeout(60000),
-  });
-  if (!res.ok) throw new Error('DeepSeek HTTP ' + res.status + ' ' + (await res.text()).slice(0, 200));
-  const j = await res.json();
-  return JSON.parse(j.choices[0].message.content);
-}
+const SYSTEM = '你是多伦多餐馆点评助手。只输出 JSON：{"dishes":[{"zh":"中文菜名","en":"原文菜名"}],"note":"一句话说明依据"}。最多 3 道菜，按推荐程度排序。没有把握就返回空数组，绝不编造。';
+const ask = prompt => dsAsk(SYSTEM, prompt);
 
 const label = s => `${s.name}${s.zh ? ' / ' + s.zh : ''}（菜系：${s.cu.join(', ') || '未知'}；地址：${s.addr || '未知'}, ${s.city || 'Toronto'}）`;
 
