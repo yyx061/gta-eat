@@ -229,6 +229,8 @@ dialog h2{margin:0 0 10px;font-family:var(--display);font-size:20px}
 .rateask .btn{padding:5px 10px}
 .rated{font-size:13px;color:var(--ok)}
 .ask-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px;font-size:14px}
+.ask-banner.night{background:var(--side);color:var(--side-ink);border-color:var(--side)}
+.ask-banner.night .btn.ghost{color:var(--side-ink)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:1200;background:var(--ink);color:var(--surface);border-radius:999px;padding:8px 16px;font-size:14px;box-shadow:0 6px 20px -6px rgba(0,0,0,.4)}
 .me-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;display:grid;gap:10px}
 .me-card h2{margin:0;font-family:var(--display);font-size:18px}

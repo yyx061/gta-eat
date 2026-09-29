@@ -5,3 +5,8 @@ scripts/node_modules/
 scripts/out/
 backup-v1/
 scripts/.venv/
+
+# 个人数据，不上传
+uber/
+*Uber Data Request*
+*.zip
