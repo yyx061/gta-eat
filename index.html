@@ -122,6 +122,7 @@
             <h2 data-i18n="meTaste">口味档案</h2>
             <p class="hint" data-i18n-html="meTasteHint">推荐会按这里排序：喜欢的排前面，不喜欢的往后放。点一下 <b class="hint-yes">❤️ 喜欢</b>，点两下 <b class="hint-no">不喜欢</b>。</p>
             <div id="me-likes" class="mood-groups"></div>
+            <div class="row"><button type="button" class="btn" id="qz-redo" data-i18n="qzRedo">重新做口味问卷</button></div>
             <div class="kg"><span class="lab" data-i18n="spice">辣</span><div class="seg" id="me-spice"></div></div>
             <div class="kg"><span class="lab" data-i18n="veg">素食</span><div class="seg" id="me-veg"></div></div>
             <div class="kg"><span class="lab" data-i18n="budget">人均</span><div><div class="seg" id="me-budget"></div><div class="hint small" data-i18n="budgetHint">人均价格数据还在补充，先记下来，补齐后生效。</div></div></div>
@@ -167,6 +168,10 @@
 </div>
 
 <div class="toast" id="toast" role="status" hidden></div>
+<dialog id="quiz" class="quiz" aria-labelledby="quiz-body">
+  <div class="quiz-body" id="quiz-body"></div>
+  <div class="quiz-foot" id="quiz-foot"></div>
+</dialog>
 <dialog id="about">
   <h2 data-i18n="about">关于数据</h2>
   <div id="foot"></div>

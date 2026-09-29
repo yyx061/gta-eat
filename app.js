@@ -219,7 +219,7 @@ function matches(p,ids,q){
 }
 /* ---------- 口味档案 & 吃过的记录（只存在这台设备上）---------- */
 // likes：标签 id，带 ! 前缀是不喜欢；spice：0 不吃辣 1 微辣 2 能吃辣；budget：人均上限（加元，人均数据补齐后生效）
-const PROF=Object.assign({likes:[],spice:null,veg:false,budget:null},LS.get('profile',{}));
+const PROF=Object.assign({likes:[],spice:null,veg:false,budget:null,diet:[],explore:null},LS.get('profile',{}));
 let HIST=LS.get('history',[]);  // [{oid,name,cu,t,r}]，r：1 好吃 0 一般 -1 不好吃 null 没评
 const saveProf=()=>LS.set('profile',PROF), saveHist=()=>LS.set('history',HIST);
 const DAY=864e5;
@@ -334,7 +334,7 @@ function roll(){
   // 一半机会只在「合你口味」的店里抽（有的话），另一半在全部里按权重抽，保留惊喜
   const fav=POOL.map((r,i)=>i).filter(i=>POOL[i].fit.s>=1.5), fsum=fav.reduce((a,i)=>a+w[i],0);
   const draw1=()=>{
-    const idx=fav.length&&Math.random()<0.5?fav:null, tot=idx?fsum:sum;
+    const idx=fav.length&&Math.random()<[0.7,0.5,0.3][PROF.explore??1]?fav:null, tot=idx?fsum:sum;  // 问卷里的「尝新」决定这个比例
     let x=Math.random()*tot;
     for(const i of idx||POOL.keys()){x-=w[i];if(x<=0)return POOL[i]}
     return POOL[(idx||[POOL.length-1]).slice(-1)[0]];
@@ -700,6 +700,126 @@ $('me-import').onchange=async e=>{
   }catch(err){toast(t('importBad'))}
   e.target.value='';
 };
+/* ---------- 口味问卷：第一次打开时出现，可跳过；「我的」里可以重做 ---------- */
+const DIETS=['dietNone','dietVeg','dietVegan','dietHalal','dietNoPork','dietNoBeef','dietNoSeafood','dietGF','dietAllergy'];
+const PAIRS=[['pairSoupA','想吃点:热汤面','pairSoupB','想吃点:寿司'],['pairSpicyA','想吃点:辣的','pairSpicyB','想吃点:三明治/轻食'],['pairRiceA','想吃点:汉堡炸鸡','pairRiceB','想吃点:米饭'],
+  ['pairPaceA','想吃点:烤肉','pairPaceB','场景:快速解决'],['pairSweetA','想吃点:奶茶','pairSweetB','想吃点:咖啡']];
+const QSTEPS=['intro','diet','spice','likes','dislikes','pairs','budget','explore','habit','favs','result'];
+const CUISINE_IDS=KW[0].items.map(([n])=>'菜系:'+n);
+let QZ=null;
+function quizOpen(){
+  QZ={i:0,diet:[...(PROF.diet||[])],spice:PROF.spice,likes:PROF.likes.filter(x=>x.startsWith('菜系:')),dislikes:PROF.likes.filter(x=>x.startsWith('!菜系:')).map(x=>x.slice(1)),
+      pairs:{},budget:PROF.budget,explore:PROF.explore,mode:S.mode,mins:S.mins,area:'',favs:[],q:'',found:[]};
+  PAIRS.forEach(([,a,,b],k)=>{if(PROF.likes.includes(a))QZ.pairs[k]='a';else if(PROF.likes.includes(b))QZ.pairs[k]='b'});
+  const d=$('quiz'); if(!d.open) d.showModal(); quizRender();
+}
+function quizClose(){LS.set('onboarded',true);$('quiz').close()}
+const qOpt=(attr,val,on,label)=>`<button type="button" class="chip qopt" ${attr}="${esc(val)}" aria-pressed="${!!on}">${esc(label)}</button>`;
+function quizRender(){
+  const step=QSTEPS[QZ.i], n=QSTEPS.length-2, body=$('quiz-body');
+  let h='', foot='';
+  const nav=(next='qzNext',skip=true)=>`<button type="button" class="btn ghost" data-qz="back">${esc(t('qzBack'))}</button>${skip?`<button type="button" class="btn ghost" data-qz="skip">${esc(t('qzSkip'))}</button>`:''}<button type="button" class="btn primary" data-qz="next">${esc(t(next))}</button>`;
+  const head=(k,sub)=>`<div class="qz-prog"><span style="width:${Math.round(QZ.i/n*100)}%"></span></div><div class="qz-step num">${t('qzStep',{i:QZ.i,n})}</div><h2>${esc(t(k))}</h2>${sub?`<p class="hint">${esc(sub)}</p>`:''}`;
+  if(step==='intro'){
+    h=`<h2 class="qz-title">${esc(t('qzTitle'))}</h2><p class="hint">${esc(t('qzIntro'))}</p>`;
+    foot=`<button type="button" class="btn ghost" data-qz="close">${esc(t('qzSkipAll'))}</button><button type="button" class="btn primary" data-qz="next">${esc(t('qzStart'))}</button>`;
+  }else if(step==='diet'){
+    const notes=[];
+    if(QZ.diet.some(d=>['dietHalal','dietNoPork','dietNoBeef','dietGF'].includes(d))) notes.push(`<p class="qz-note">${esc(t('qzDietNote'))}</p>`);
+    if(QZ.diet.includes('dietAllergy')) notes.push(`<p class="qz-note warn">⚠️ ${esc(t('qzAllergyNote'))}</p>`);
+    h=head('qzDiet',t('qzMulti'))+`<div class="chips">${DIETS.map(d=>qOpt('data-qdiet',d,QZ.diet.includes(d),t(d))).join('')}</div>`+notes.join('');
+    foot=nav();
+  }else if(step==='spice'){
+    h=head('qzSpice')+`<div class="chips">${[[0,'spice0'],[1,'spice1'],[2,'spiceMid'],[3,'spice3']].map(([v,k])=>qOpt('data-qspice',v,QZ.spice===v,t(k))).join('')}</div>`;
+    foot=nav();
+  }else if(step==='likes'||step==='dislikes'){
+    const mine=step==='likes'?QZ.likes:QZ.dislikes, other=step==='likes'?QZ.dislikes:QZ.likes;
+    h=head(step==='likes'?'qzLikes':'qzDislikes',t('qzMulti'))+`<div class="chips">${CUISINE_IDS.filter(id=>!other.includes(id)).map(id=>qOpt(step==='likes'?'data-qlike':'data-qdislike',id,mine.includes(id),kwLabel(id))).join('')}</div>`;
+    foot=nav();
+  }else if(step==='pairs'){
+    h=head('qzPairs',t('qzPairsHint'))+`<div class="qz-pairs">${PAIRS.map(([a,,b],k)=>`<div class="qz-pair">${['a','b'].map(side=>`<button type="button" class="qz-side" data-qpair="${k}|${side}" aria-pressed="${QZ.pairs[k]===side}">${esc(t(side==='a'?a:b))}</button>`).join('<span class="qz-or">or</span>')}</div>`).join('')}</div>`;
+    foot=nav();
+  }else if(step==='budget'){
+    h=head('qzBudget')+`<div class="chips">${[[15,'budget15'],[25,'budget25'],[40,'budget40'],['','budgetFree']].map(([v,k])=>qOpt('data-qbudget',v,String(QZ.budget??'')===String(v),t(k))).join('')}</div><p class="hint small">${esc(t('budgetHint'))}</p>`;
+    foot=nav();
+  }else if(step==='explore'){
+    h=head('qzExplore')+`<div class="chips">${[0,1,2].map(v=>qOpt('data-qexplore',v,QZ.explore===v,t('explore'+v))).join('')}</div>`;
+    foot=nav();
+  }else if(step==='habit'){
+    h=head('qzHabit',t('qzHabitHint'))+`<div class="chips">${Object.entries(MODES).map(([k,m])=>qOpt('data-qmode',k,QZ.mode===k,m.ico+' '+t(m.k))).join('')}</div>
+      <div class="chips">${MINS.map(v=>qOpt('data-qmins',v,QZ.mins===v,v+' '+t('minUnit'))).join('')}</div>
+      <label class="lab" for="qz-area">${esc(t('qzArea'))} · ${esc(t('qzOptional'))}</label>
+      <select id="qz-area" class="in"><option value="">${esc(t('pickArea'))}</option>${HOODS.map((hd,i)=>`<option value="${i}"${String(QZ.area)===String(i)?' selected':''}>${esc(hoodName(hd))}</option>`).join('')}</select>`;
+    foot=nav();
+  }else if(step==='favs'){
+    const added=QZ.favs.map(o=>P.find(p=>p.oid===o)).filter(Boolean);
+    h=head('qzFavs',t('qzFavsHint')+' '+t('qzOptional'))+`<input id="qz-fav-q" class="in" type="search" placeholder="${esc(t('qzFavsPh'))}" value="${esc(QZ.q)}" autocomplete="off">
+      <div class="qz-found">${QZ.q.length>=2?(QZ.found.length?QZ.found.map(p=>`<button type="button" class="qz-hit" data-qfav="${esc(p.oid)}"><b>${esc(p.name)}</b><small>${esc([p.addr,p.city].filter(Boolean).join(', '))}</small></button>`).join(''):`<p class="hint">${esc(t('qzFavsNone'))}</p>`):''}</div>
+      ${added.length?`<div class="chips">${added.map(p=>`<button type="button" class="chip" data-qunfav="${esc(p.oid)}" aria-pressed="true">👍 ${esc(p.name)} ✕</button>`).join('')}</div>`:''}`;
+    foot=nav('qzDone');
+  }else{  // result
+    const picks=[...NEAR].filter(r=>r.fit.s>-9&&['ok','tight','soon'].includes(r.st.k)).sort((a,b)=>b.fit.s-a.fit.s||a.d-b.d);
+    const out=[], seen=new Set();
+    for(const r of picks){const k=(r.fit.why.find(x=>x.good)||{}).t||r.p.cu[0]||r.p.name;if(seen.has(k))continue;seen.add(k);out.push(r);if(out.length===3)break}  // 3 家尽量对应不同的喜好
+    h=`<h2 class="qz-title">${esc(t('qzResult'))}</h2>`+(out.length?`<div class="cards">${out.map(card).join('')}</div>`:`<p class="hint">${esc(t('qzResultNone'))}</p>`);
+    foot=`<button type="button" class="btn primary" data-qz="close">${esc(t('qzGo'))}</button>`;
+  }
+  body.innerHTML=h; $('quiz-foot').innerHTML=foot;
+  if(step==='favs'){const i=$('qz-fav-q');i.oninput=()=>{QZ.q=i.value.trim();quizSearch();const pos=i.selectionStart;quizRender();const j=$('qz-fav-q');j.focus();j.setSelectionRange(pos,pos)}}
+  if(step==='habit') $('qz-area').onchange=e=>{QZ.area=e.target.value};
+  body.scrollTop=0;
+}
+function quizSearch(){
+  const q=QZ.q.toLowerCase(); if(q.length<2){QZ.found=[];return}
+  const hits=[], seen=new Set();
+  for(const p of P){ if(!(p.name.toLowerCase().includes(q)||p.zh.includes(QZ.q))) continue;
+    const k=p.name+'|'+p.addr; if(seen.has(k)) continue; seen.add(k); hits.push({p,d:dist(S.lat,S.lng,p.lat,p.lng)}) }
+  QZ.found=hits.sort((a,b)=>a.d-b.d).slice(0,6).map(x=>x.p);
+}
+function quizApply(){  // 把问卷答案写进口味档案
+  const pairIds=PAIRS.flatMap(([,a,,b])=>[a,b]);
+  const keep=PROF.likes.filter(x=>{const id=x.replace(/^!/,'');return !CUISINE_IDS.includes(id)&&!pairIds.includes(id)});
+  const likes=[...QZ.likes,...QZ.dislikes.map(x=>'!'+x)];
+  PAIRS.forEach(([,a,,b],k)=>{if(QZ.pairs[k]==='a')likes.push(a);if(QZ.pairs[k]==='b')likes.push(b)});
+  if(QZ.spice===3&&!likes.includes('想吃点:辣的')) likes.push('想吃点:辣的');
+  if(QZ.diet.includes('dietNoSeafood')&&!likes.includes('!菜系:海鲜')) likes.push('!菜系:海鲜');
+  PROF.likes=[...new Set([...keep,...likes])];
+  PROF.diet=QZ.diet.filter(d=>d!=='dietNone');
+  PROF.veg=PROF.diet.includes('dietVeg')||PROF.diet.includes('dietVegan');
+  if(QZ.spice!=null) PROF.spice=Math.min(2,QZ.spice);
+  PROF.budget=QZ.budget===''?null:QZ.budget; PROF.explore=QZ.explore;
+  for(const o of QZ.favs){const p=P.find(x=>x.oid===o);if(p&&!HIST.some(h=>h.oid===o&&h.r===1))HIST.push({oid:o,name:p.name,cu:p.cu,t:Date.now()-7*DAY,r:1})}
+  S.mode=QZ.mode; S.mins=QZ.mins;
+  if(QZ.area!==''){const i=+QZ.area,h=HOODS[i];S.lat=h[2];S.lng=h[3];S.locName=h[0];S.locKey='hood:'+i;S.acc=null}
+  save(); saveHist(); LS.set('onboarded',true); histChanged(); limit=40; picked=null; update(true);
+}
+document.addEventListener('click',e=>{
+  if(!e.target.closest('#quiz')) return;
+  const b=e.target.closest('[data-qz]');
+  if(b){const a=b.dataset.qz;
+    if(a==='close'){quizClose();if(QSTEPS[QZ.i]==='result'&&S.view!=='rand')setView('rand');return}
+    if(a==='back'){QZ.i=Math.max(0,QZ.i-1);quizRender();return}
+    if(a==='skip'){const st=QSTEPS[QZ.i];if(st==='diet')QZ.diet=[];if(st==='pairs')QZ.pairs={};if(st==='favs')QZ.favs=[]}
+    if(QSTEPS[QZ.i]==='favs') quizApply();
+    QZ.i=Math.min(QSTEPS.length-1,QZ.i+1); quizRender(); return}
+  const el=e.target.closest('[data-qdiet],[data-qspice],[data-qlike],[data-qdislike],[data-qpair],[data-qbudget],[data-qexplore],[data-qmode],[data-qmins],[data-qfav],[data-qunfav]'); if(!el) return;
+  const d=el.dataset, tog=(arr,v)=>{const i=arr.indexOf(v);i>=0?arr.splice(i,1):arr.push(v)};
+  if(d.qdiet){ if(d.qdiet==='dietNone') QZ.diet=QZ.diet.includes('dietNone')?[]:['dietNone']; else {QZ.diet=QZ.diet.filter(x=>x!=='dietNone');tog(QZ.diet,d.qdiet)} }
+  else if(d.qspice!=null) QZ.spice=QZ.spice===+d.qspice?null:+d.qspice;
+  else if(d.qlike) tog(QZ.likes,d.qlike);
+  else if(d.qdislike) tog(QZ.dislikes,d.qdislike);
+  else if(d.qpair){const [k,side]=d.qpair.split('|');QZ.pairs[k]=QZ.pairs[k]===side?undefined:side}
+  else if(d.qbudget!=null) QZ.budget=String(QZ.budget??'')===d.qbudget?null:(d.qbudget===''?'':+d.qbudget);
+  else if(d.qexplore!=null) QZ.explore=QZ.explore===+d.qexplore?null:+d.qexplore;
+  else if(d.qmode) QZ.mode=d.qmode;
+  else if(d.qmins) QZ.mins=+d.qmins;
+  else if(d.qfav){if(!QZ.favs.includes(d.qfav))QZ.favs.push(d.qfav);QZ.q='';QZ.found=[]}
+  else if(d.qunfav) QZ.favs=QZ.favs.filter(o=>o!==d.qunfav);
+  quizRender();
+});
+$('quiz').addEventListener('cancel',()=>LS.set('onboarded',true));  // Esc 关掉也算跳过
+$('qz-redo').onclick=()=>quizOpen();
+
 /* ---------- 切换语言 ---------- */
 function applyStatic(){  // index.html 里带 data-i18n 的静态文字
   document.documentElement.lang=LANG==='zh'?'zh-CN':'en';
@@ -717,10 +837,12 @@ function setLang(l){
   applyStatic(); persona(); setTiles(); renderControls(); renderKW(); renderMoods(); renderFoot(); checkPending();
   if(picking) setPicking(true);
   update(); if(S.view==='me') renderMe();
+  if($('quiz').open) quizRender();
 }
 applyStatic();
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkPending()});
 checkPending();
 renderControls();renderKW();renderMoods();renderFoot();renderView();
 update(true);
+if(!LS.get('onboarded',false)&&!PROF.likes.length&&!HIST.length) quizOpen();  // 第一次打开：口味问卷
 })();

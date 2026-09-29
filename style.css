@@ -235,6 +235,33 @@ dialog h2{margin:0 0 10px;font-family:var(--display);font-size:20px}
 .hrate button{padding:4px 8px;font-size:12px}
 @media (max-width:560px){.hrow{grid-template-columns:40px minmax(0,1fr) auto}.hrow .hrate{grid-column:2 / 4}}
 
+/* ---------- 口味问卷 ---------- */
+dialog.quiz{padding:0;width:min(600px,calc(100vw - 32px));max-height:min(760px,calc(100vh - 48px));display:none;flex-direction:column;overflow:hidden}
+dialog.quiz[open]{display:flex}
+.quiz-body{flex:1;padding:22px 24px 12px;overflow:auto;display:grid;gap:12px;align-content:start}
+.quiz-body h2{margin:0;font-family:var(--display);font-size:22px;line-height:1.25}
+.quiz-body .qz-title{font-size:clamp(24px,4vw,30px);font-weight:800;letter-spacing:-.01em}
+.quiz-foot{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;padding:12px 24px calc(14px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);background:var(--surface)}
+.quiz-foot .btn{padding:9px 16px;font-size:14px}
+.qz-prog{height:4px;border-radius:4px;background:var(--sunk);overflow:hidden}
+.qz-prog span{display:block;height:100%;background:var(--me);transition:width .25s}
+.qz-step{font-size:12px;color:var(--faint)}
+.qopt{font-size:14px;padding:7px 14px}
+.qz-note{margin:0;font-size:13px;color:var(--muted);background:var(--sunk);border-radius:var(--r);padding:8px 10px}
+.qz-note.warn{color:var(--ink);background:var(--warn-soft)}
+.qz-pairs{display:grid;gap:8px}
+.qz-pair{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
+.qz-side{appearance:none;border:1px solid var(--line);background:var(--surface);border-radius:var(--r-lg);padding:12px 10px;cursor:pointer;font-size:14px;text-align:center;min-height:52px}
+.qz-side:hover{border-color:var(--ink)}
+.qz-side[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.qz-or{font-size:12px;color:var(--faint)}
+.qz-found{display:grid;gap:4px}
+.qz-hit{appearance:none;border:1px solid var(--line);background:var(--surface);border-radius:var(--r);padding:8px 10px;text-align:left;cursor:pointer;display:grid}
+.qz-hit:hover{border-color:var(--ink)}
+.qz-hit small{color:var(--muted);font-size:12px}
+.quiz .cards .more{display:none}
+@media (prefers-reduced-motion:reduce){.qz-prog span{transition:none}}
+
 /* ---------- 窄屏 ---------- */
 @media (max-width:1100px){
   .stage{grid-template-columns:1fr}
@@ -254,6 +281,9 @@ dialog h2{margin:0 0 10px;font-family:var(--display);font-size:20px}
   .tab[aria-selected="true"]{box-shadow:inset 0 -3px 0 var(--me)}
   .content{padding:calc(12px + env(safe-area-inset-top,0px)) calc(16px + env(safe-area-inset-right,0px)) 96px calc(16px + env(safe-area-inset-left,0px))}
   .pick{padding:22px 18px}
+  dialog.quiz{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;border-radius:0;border:0;padding-top:env(safe-area-inset-top,0px)}
+  .quiz-body{padding:18px 16px 10px}
+  .quiz-foot{padding-inline:16px}
   .in,.search .in,.addr .in{font-size:16px} /* iPhone：小于 16px 的输入框一点就会自动放大页面 */
 }
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
