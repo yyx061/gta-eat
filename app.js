@@ -967,17 +967,23 @@ $('me-export').onclick=()=>{
   const a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(blob),download:`${t('exportName')}-${new Date().toISOString().slice(0,10)}.json`});
   document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),5000);
 };
-$('me-import').onchange=async e=>{
-  const f=e.target.files[0]; if(!f) return;
+function importText(text){  // 导入备份或 Uber 口味档案（文件或粘贴的文字都走这里）
   try{
-    const j=JSON.parse(await f.text());
+    const j=JSON.parse(String(text||'').trim());
     if(j.profile){for(const k of ['spice','veg','budget','diet','explore','ctx','noAsk','noFast','favBrands','ctxLikes','nightOwl']) if(j.profile[k]!==undefined&&j.profile[k]!==null) PROF[k]=j.profile[k]; PROF.likes=[...new Set([...PROF.likes,...(j.profile.likes||[])])]}
     if(Array.isArray(j.history)){const seen=new Set(HIST.map(h=>h.oid+'|'+h.t));for(const h of j.history) if(h&&h.oid&&h.t&&!seen.has(h.oid+'|'+h.t)) HIST.push({oid:h.oid,name:h.name||'',cu:h.cu||[],t:+h.t,r:h.r??null})}
     if(Array.isArray(j.favs)){j.favs.forEach(o=>favs.add(o));LS.set('favs',[...favs])}
-    histChanged(); toast(t('imported'));
-  }catch(err){toast(t('importBad'))}
-  e.target.value='';
+    if(!j.profile&&!j.history&&!j.favs) throw new Error('empty');
+    histChanged(); toast(t('imported')); return true;
+  }catch(err){toast(t('importBad')); return false}
+}
+$('me-import').onchange=async e=>{ const f=e.target.files[0]; if(f) importText(await f.text()); e.target.value='' };
+// 粘贴导入：配合苹果的通用剪贴板，在 Mac 上复制、手机上点这里就行；读不了剪贴板时退回手动粘贴的输入框
+$('me-paste').onclick=async()=>{
+  try{ const txt=await navigator.clipboard.readText(); if(txt&&importText(txt)) return }catch(err){}
+  const box=$('paste-box'); box.hidden=false; $('paste-ta').focus();
 };
+$('paste-go').onclick=()=>{ if(importText($('paste-ta').value)){ $('paste-ta').value=''; $('paste-box').hidden=true } };
 /* ---------- 口味问卷：第一次打开时出现，可跳过；「我的」里可以重做 ---------- */
 const DIETS=['dietNone','dietVeg','dietVegan','dietHalal','dietNoPork','dietNoBeef','dietNoSeafood','dietGF','dietAllergy'];
 // 滑动卡片：16 个菜系 + 12 个「想吃点」，右滑喜欢、左滑不感兴趣、上滑/点「无所谓」跳过
