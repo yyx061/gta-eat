@@ -15,13 +15,13 @@ import { parseOH } from './lib/oh.mjs';
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2), mode = argv[0] || 'trial';
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 ? +argv[i + 1] : d };
-const BUDGET = opt('budget', 3), LIMIT = opt('limit', Infinity), CONC = opt('conc', 4);  // 渲染另有上限（lib/web.mjs 的 RENDER_MAX）
+const BUDGET = opt('budget', 3), LIMIT = opt('limit', Infinity), CONC = opt('conc', 8);  // 渲染另有上限（lib/web.mjs 的 RENDER_MAX）
 const OUT = path.join(ROOT, 'scripts/out/siteinfo.jsonl');
 
 global.window = {};
 await import(path.join(ROOT, 'data/food-data.js'));
 const D = window.FOOD_DATA;
-const shops = D.rows.map(r => ({ name: r[0], zh: r[1], type: r[4], cu: r[5].map(k => D.cuisines[k]), oh: r[6], addr: r[7], city: r[8], web: r[11], oid: r[12] }));
+const shops = D.rows.map(r => ({ name: r[0], zh: r[1], lat: r[2], lng: r[3], type: r[4], cu: r[5].map(k => D.cuisines[k]), oh: r[6], addr: r[7], city: r[8], web: r[11], oid: r[12] }));
 
 // 连锁：同名 ≥3 家且 ≥2 家有营业时间（和 app.js 的连锁推测一致），这些先不跑
 const norm = s => s.toLowerCase().replace(/[^a-z0-9一-鿿]/g, '');
@@ -38,8 +38,13 @@ let todo;
 if (mode === 'trial') todo = [...sample(shops.filter(s => !s.oh && readable(s)), 120).map(s => ({ ...s, group: 'unknown' })),
                               ...sample(shops.filter(s => s.oh && readable(s)), 30).map(s => ({ ...s, group: 'control' }))];
 else if (mode === 'redo') { const ids = new Set(argv.slice(1).filter(a => !a.startsWith('--'))); todo = shops.filter(s => ids.has(s.oid)).map(s => ({ ...s, group: s.oh ? 'control' : 'unknown', redo: true })) }
-else todo = shops.filter(s => !s.oh && readable(s)).map(s => ({ ...s, group: 'unknown' }));
-todo = todo.filter(s => s.redo || !done.has(s.oid)).slice(0, LIMIT);  // 先抽样再去掉已跑过的，中断后接着跑还是同一批
+else {  // 全量：离市中心近的先跑，中途停下（比如到了预算）也是常去的区域先有数据
+  const km = (a, b) => Math.hypot((a.lat - 43.6532) * 111, (a.lng + 79.3832) * 80.4);
+  todo = shops.filter(s => !s.oh && readable(s)).map(s => ({ ...s, group: 'unknown' })).sort((a, b) => km(a) - km(b));
+}
+const remaining = todo.filter(s => s.redo || !done.has(s.oid));
+console.log(`还剩 ${remaining.length} 家没跑`);
+todo = remaining.slice(0, LIMIT);  // 先抽样再去掉已跑过的，中断后接着跑还是同一批
 
 // 只把和营业时间、菜单、价格相关的文字发给 DeepSeek，省 token
 const HOURS_WORD = /\b(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?\b|hours|open|close[ds]?\b|daily|\b\d{1,2}(:\d\d)?\s*(am|pm)\b|\b\d{1,2}:\d\d\b|周[一二三四五六日]|营业/gi;
@@ -116,7 +121,8 @@ let next = 0, n = 0, stopped = false;
 const t0 = Date.now();
 await Promise.all(Array.from({ length: CONC }, async () => {
   while (next < todo.length && !stopped) {
-    if (spent() >= BUDGET * 0.97) { stopped = true; console.log(`\n⚠ 已花 $${spent().toFixed(3)}，接近预算 $${BUDGET}，停止。`); break }
+    const real = spend.balance0 - spend.balanceNow;
+    if (real >= BUDGET * 0.97 || spend.est >= BUDGET * 2) { stopped = true; console.log(`\n⚠ 实际已花 $${real.toFixed(2)}（估算 $${spend.est.toFixed(2)}），到预算 $${BUDGET} 了，停止。`); break }
     const s = todo[next++];
     let rec;
     try { rec = { oid: s.oid, name: s.name, web: s.web, group: s.group, truth: s.oh || undefined, ...(await one(s)) } }
@@ -125,7 +131,7 @@ await Promise.all(Array.from({ length: CONC }, async () => {
     n++;
     if (n % 20 === 0) { try { spend.balanceNow = await balance() } catch {} }
     const tag = rec.error ? '失败' : rec.skip ? '跳过' : rec.hours ? '有时间' : '没时间';
-    console.log(`[${n}/${todo.length}] ${tag.padEnd(3)} ${s.name}  ${rec.hours || rec.error || rec.skip || ''}${rec.price ? `  $${rec.price.min}-${rec.price.max}` : ''}  (已花 ~$${spent().toFixed(3)})`);
+    console.log(`[${n}/${todo.length}] ${tag.padEnd(3)} ${s.name}  ${rec.hours || rec.error || rec.skip || ''}${rec.price ? `  $${rec.price.min}-${rec.price.max}` : ''}  (实际 $${(spend.balance0 - spend.balanceNow).toFixed(2)} · 估算 $${spend.est.toFixed(2)})`);
   }
 }));
 out.end();
