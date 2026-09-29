@@ -209,12 +209,35 @@ dialog::backdrop{background:rgba(10,15,12,.45)}
 dialog h2{margin:0 0 10px;font-family:var(--display);font-size:20px}
 #foot{display:grid;gap:8px;font-size:13px;color:var(--muted);margin-bottom:14px}
 
+/* ---------- 口味：推荐理由、吃过了 ---------- */
+.why-row{display:flex;flex-wrap:wrap;gap:4px;margin-top:6px}
+.why{font-size:12px;border-radius:999px;padding:1px 9px}
+.why.good{background:var(--accent-soft);color:var(--accent)}
+.why.bad{background:var(--sunk);color:var(--muted)}
+.linkbtn{appearance:none;border:0;background:none;padding:0;color:var(--accent);cursor:pointer;font:inherit;font-size:13px;text-decoration:underline;text-underline-offset:2px}
+.rateask{display:inline-flex;flex-wrap:wrap;align-items:center;gap:6px;font-size:13px}
+.rateask .btn{padding:5px 10px}
+.rated{font-size:13px;color:var(--ok)}
+.ask-banner{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 14px;background:var(--accent-soft);border:1px solid var(--accent);border-radius:var(--r-lg);padding:10px 14px;margin-bottom:14px;font-size:14px}
+.toast{position:fixed;left:50%;transform:translateX(-50%);white-space:nowrap;max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;bottom:calc(24px + env(safe-area-inset-bottom,0px));z-index:1200;background:var(--ink);color:var(--surface);border-radius:999px;padding:8px 16px;font-size:14px;box-shadow:0 6px 20px -6px rgba(0,0,0,.4)}
+.me-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;display:grid;gap:10px}
+.me-card h2{margin:0;font-family:var(--display);font-size:18px}
+.hint.small{font-size:12px;margin-top:4px}
+.hlist{display:grid}
+.hrow{display:grid;grid-template-columns:44px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
+.hrow:first-child{border-top:0}
+.hdate{color:var(--faint);font-size:12px}
+.hname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.hrate button{padding:4px 8px;font-size:12px}
+@media (max-width:560px){.hrow{grid-template-columns:40px minmax(0,1fr) auto}.hrow .hrate{grid-column:2 / 4}}
+
 /* ---------- 窄屏 ---------- */
 @media (max-width:1100px){
   .stage{grid-template-columns:1fr}
   .mapcol{position:static;order:-1}
   #map{height:320px;min-height:0}
-  .stage[data-view="rand"] .mapcol{order:0}
+  .stage[data-view="rand"] .mapcol,.stage[data-view="me"] .mapcol{order:0}
+  .toast{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
 }
 @media (max-width:760px){
   .app{grid-template-columns:1fr}

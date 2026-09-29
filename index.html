@@ -33,11 +33,13 @@
       <button type="button" class="tab" role="tab" data-view="rand" id="tab-rand"><span class="ico" aria-hidden="true">🎲</span><span class="tl">随便吃<small>不知道吃什么</small></span></button>
       <button type="button" class="tab" role="tab" data-view="find" id="tab-find"><span class="ico" aria-hidden="true">🔍</span><span class="tl">找一家<small>想好了吃什么</small></span></button>
       <button type="button" class="tab" role="tab" data-view="fav" id="tab-fav"><span class="ico" aria-hidden="true">★</span><span class="tl">收藏<small id="fav-count"></small></span></button>
+      <button type="button" class="tab" role="tab" data-view="me" id="tab-me"><span class="ico" aria-hidden="true">🙂</span><span class="tl">我的<small>口味和吃过的</small></span></button>
     </div>
     <button type="button" class="about-btn" id="about-btn">关于数据</button>
   </nav>
 
   <main class="content">
+    <div class="ask-banner" id="ask-banner" hidden></div>
     <!-- 条件：一句话 -->
     <section class="query" aria-label="出发条件">
       <p class="sentence">
@@ -107,6 +109,31 @@
           <div class="cards" id="cards"></div>
         </section>
 
+        <!-- 我的 -->
+        <section class="view" id="view-me" aria-labelledby="tab-me">
+          <div class="me-card">
+            <h2>口味档案</h2>
+            <p class="hint">推荐会按这里排序：喜欢的排前面，不喜欢的往后放。点一下 <b class="hint-yes">❤️ 喜欢</b>，点两下 <b class="hint-no">不喜欢</b>。</p>
+            <div id="me-likes" class="mood-groups"></div>
+            <div class="kg"><span class="lab">辣</span><div class="seg" id="me-spice"></div></div>
+            <div class="kg"><span class="lab">素食</span><div class="seg" id="me-veg"></div></div>
+            <div class="kg"><span class="lab">人均</span><div><div class="seg" id="me-budget"></div><div class="hint small">人均价格数据还在补充，先记下来，补齐后生效。</div></div></div>
+          </div>
+          <div class="me-card">
+            <div class="listhead"><h2 id="me-hist-h">吃过的</h2></div>
+            <p class="hint">最近 3 天吃过的店、昨天刚吃过的同类会往后排，换换口味；👎 的店不会再推荐。</p>
+            <div id="me-hist" class="hlist"></div>
+          </div>
+          <div class="me-card">
+            <h2>备份和导入</h2>
+            <p class="hint">口味档案和记录只存在这台设备上。换手机、或者导入从 Uber 订单整理出来的口味档案时用这里。</p>
+            <div class="row">
+              <button type="button" class="btn" id="me-export">导出备份</button>
+              <label class="btn">导入文件<input type="file" id="me-import" accept=".json,application/json" hidden></label>
+            </div>
+          </div>
+        </section>
+
         <!-- 收藏 -->
         <section class="view" id="view-fav" aria-labelledby="tab-fav">
           <div class="listhead"><h2 id="fav-h"></h2></div>
@@ -132,6 +159,7 @@
   </main>
 </div>
 
+<div class="toast" id="toast" role="status" hidden></div>
 <dialog id="about">
   <h2>关于数据</h2>
   <div id="foot"></div>
