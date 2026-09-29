@@ -51,7 +51,11 @@ a{color:var(--accent)}
 .tab .ico{font-size:18px;width:24px;text-align:center}
 .tab .tl{display:grid;font-weight:700;font-size:15px;line-height:1.25}
 .tab small{font-weight:400;font-size:12px;color:var(--side-muted)}
-.about-btn{margin-top:auto;appearance:none;border:0;background:none;color:var(--side-muted);text-align:left;padding:8px 10px;cursor:pointer;font-size:12px;text-decoration:underline;text-underline-offset:3px}
+.side-foot{margin-top:auto;display:grid;gap:8px;justify-items:start}
+.side .lang-seg{background:var(--side-hi);border-color:var(--side-hi)}
+.side .lang-seg button{color:var(--side-muted)}
+.side .lang-seg button[aria-pressed="true"]{background:var(--side-ink);color:var(--side)}
+.about-btn{appearance:none;border:0;background:none;color:var(--side-muted);text-align:left;padding:8px 10px;cursor:pointer;font-size:12px;text-decoration:underline;text-underline-offset:3px}
 .about-btn:hover{color:var(--side-ink)}
 
 .content{padding:calc(22px + env(safe-area-inset-top,0px)) clamp(16px,2.4vw,32px) 40px;min-width:0}
@@ -242,7 +246,7 @@ dialog h2{margin:0 0 10px;font-family:var(--display);font-size:20px}
 @media (max-width:760px){
   .app{grid-template-columns:1fr}
   .side{position:fixed;z-index:1100;left:0;right:0;top:auto;bottom:0;height:auto;flex-direction:row;padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));gap:0;border-top:1px solid var(--side-hi)}
-  .brand,.about-btn{display:none}
+  .brand,.side-foot{display:none}
   .tabs{grid-auto-flow:column;grid-auto-columns:1fr;width:100%}
   .tab{flex-direction:column;gap:2px;padding:6px}
   .tab small{display:none}

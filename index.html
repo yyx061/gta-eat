@@ -24,44 +24,47 @@
 <div class="app">
 
   <!-- 侧边导航（手机上变成底部标签栏） -->
-  <nav class="side" aria-label="功能">
+  <nav class="side" aria-label="功能" data-i18n-aria="navAria">
     <div class="brand">
-      <div class="logo">今天吃什么</div>
+      <div class="logo" data-i18n="appName">今天吃什么</div>
       <div class="clock" id="clock"></div>
     </div>
     <div class="tabs" role="tablist">
-      <button type="button" class="tab" role="tab" data-view="rand" id="tab-rand"><span class="ico" aria-hidden="true">🎲</span><span class="tl">随便吃<small>不知道吃什么</small></span></button>
-      <button type="button" class="tab" role="tab" data-view="find" id="tab-find"><span class="ico" aria-hidden="true">🔍</span><span class="tl">找一家<small>想好了吃什么</small></span></button>
-      <button type="button" class="tab" role="tab" data-view="fav" id="tab-fav"><span class="ico" aria-hidden="true">★</span><span class="tl">收藏<small id="fav-count"></small></span></button>
-      <button type="button" class="tab" role="tab" data-view="me" id="tab-me"><span class="ico" aria-hidden="true">🙂</span><span class="tl">我的<small>口味和吃过的</small></span></button>
+      <button type="button" class="tab" role="tab" data-view="rand" id="tab-rand"><span class="ico" aria-hidden="true">🎲</span><span class="tl"><span data-i18n="tabRand">随便吃</span><small data-i18n="tabRandSub">不知道吃什么</small></span></button>
+      <button type="button" class="tab" role="tab" data-view="find" id="tab-find"><span class="ico" aria-hidden="true">🔍</span><span class="tl"><span data-i18n="tabFind">找一家</span><small data-i18n="tabFindSub">想好了吃什么</small></span></button>
+      <button type="button" class="tab" role="tab" data-view="fav" id="tab-fav"><span class="ico" aria-hidden="true">★</span><span class="tl"><span data-i18n="tabFav">收藏</span><small id="fav-count"></small></span></button>
+      <button type="button" class="tab" role="tab" data-view="me" id="tab-me"><span class="ico" aria-hidden="true">🙂</span><span class="tl"><span data-i18n="tabMe">我的</span><small data-i18n="tabMeSub">口味和吃过的</small></span></button>
     </div>
-    <button type="button" class="about-btn" id="about-btn">关于数据</button>
+    <div class="side-foot">
+      <div class="seg lang-seg" data-lang-seg role="radiogroup" aria-label="语言 / Language"></div>
+      <button type="button" class="about-btn" id="about-btn" data-i18n="about">关于数据</button>
+    </div>
   </nav>
 
   <main class="content">
     <div class="ask-banner" id="ask-banner" hidden></div>
     <!-- 条件：一句话 -->
-    <section class="query" aria-label="出发条件">
+    <section class="query" aria-label="出发条件" data-i18n-aria="qAria">
       <p class="sentence">
-        从 <button type="button" class="tok" id="tok-loc"></button> 出发，
-        <span class="modes" id="mode-seg" role="radiogroup" aria-label="交通方式"></span>
-        <span class="mins" id="mins-seg" role="radiogroup" aria-label="最多多少分钟"></span> 分钟内，
+        <span data-i18n="qFrom">从</span> <button type="button" class="tok" id="tok-loc"></button> <span data-i18n="qDepart">出发，</span>
+        <span class="modes" id="mode-seg" role="radiogroup" aria-label="交通方式" data-i18n-aria="modesAria"></span>
+        <span data-i18n="qWithin"></span> <span class="mins" id="mins-seg" role="radiogroup" aria-label="最多多少分钟" data-i18n-aria="minsAria"></span> <span data-i18n="qMinWithin">分钟内，</span>
         <button type="button" class="tok" id="tok-when"></button>
       </p>
       <div class="pop" id="pop-loc" hidden>
         <form class="addr" id="loc-form" autocomplete="off">
-          <label class="lab" for="loc-q">从哪里出发</label>
+          <label class="lab" for="loc-q" data-i18n="fromWhere">从哪里出发</label>
           <div class="row">
-            <input id="loc-q" class="in grow" type="search" enterkeyhint="search" placeholder="输入地址、路口或地标，如 3300 Dufferin St、Union Station" aria-autocomplete="list" aria-controls="loc-sug">
-            <button class="btn primary" id="loc-go" type="submit">用这个地址</button>
+            <input id="loc-q" class="in grow" type="search" enterkeyhint="search" placeholder="输入地址、路口或地标，如 3300 Dufferin St、Union Station" data-i18n-ph="addrPh" aria-autocomplete="list" aria-controls="loc-sug">
+            <button class="btn primary" id="loc-go" type="submit" data-i18n="useAddr">用这个地址</button>
           </div>
           <ul class="sug" id="loc-sug" role="listbox" hidden></ul>
         </form>
         <div class="chips small" id="loc-recent"></div>
         <div class="row">
-          <select id="loc-preset" class="in" aria-label="选一个区域"></select>
-          <button class="btn" id="pick-btn" type="button">在地图上点选</button>
-          <button class="btn" id="geo-btn" type="button">📍 用我现在的位置</button>
+          <select id="loc-preset" class="in" aria-label="选一个区域" data-i18n-aria="pickAreaAria"></select>
+          <button class="btn" id="pick-btn" type="button" data-i18n="pickOnMap">在地图上点选</button>
+          <button class="btn" id="geo-btn" type="button" data-i18n="useMyLoc">📍 用我现在的位置</button>
         </div>
         <div class="where" id="where"></div>
       </div>
@@ -69,8 +72,8 @@
         <div class="row">
           <div class="seg" id="when-seg"></div>
           <span id="when-custom" class="row" hidden>
-            <select id="when-day" class="in" aria-label="哪天"></select>
-            <input id="when-time" type="time" class="in num" value="18:30" aria-label="几点">
+            <select id="when-day" class="in" aria-label="哪天" data-i18n-aria="whichDay"></select>
+            <input id="when-time" type="time" class="in num" value="18:30" aria-label="几点" data-i18n-aria="whatTime">
           </span>
         </div>
       </div>
@@ -82,7 +85,7 @@
         <!-- 随便吃 -->
         <section class="view" id="view-rand" aria-labelledby="tab-rand">
           <div class="moods">
-            <span class="hint">想吃点什么？点一下 <b class="hint-yes">想吃</b>，点两下 <b class="hint-no">不想吃</b>，不选就完全随机</span>
+            <span class="hint" data-i18n-html="moodHint">想吃点什么？点一下 <b class="hint-yes">想吃</b>，点两下 <b class="hint-no">不想吃</b>，不选就完全随机</span>
             <div id="moods" class="mood-groups"></div>
           </div>
           <div id="pick"></div>
@@ -91,15 +94,15 @@
         <!-- 找一家 -->
         <section class="view" id="view-find" aria-labelledby="tab-find">
           <div class="search">
-            <input id="q" class="in grow" placeholder="搜店名、菜系、特色菜或街道，例如 ramen、Spadina、叉烧" aria-label="搜索">
-            <button class="btn ghost" id="clear" type="button">清空条件</button>
+            <input id="q" class="in grow" placeholder="搜店名、菜系、特色菜或街道，例如 ramen、Spadina、叉烧" aria-label="搜索" data-i18n-ph="searchPh" data-i18n-aria="searchAria">
+            <button class="btn ghost" id="clear" type="button" data-i18n="clear">清空条件</button>
           </div>
-          <span class="hint">点一下 <b class="hint-yes">想吃</b>，点两下 <b class="hint-no">不想吃</b></span>
+          <span class="hint" data-i18n-html="tapHint">点一下 <b class="hint-yes">想吃</b>，点两下 <b class="hint-no">不想吃</b></span>
           <div class="chips" id="kw-main"></div>
           <details class="more-kw" id="more-kw">
             <summary>更多条件</summary>
             <div id="kw-more"></div>
-            <div class="kg"><span class="lab">显示</span><div class="seg" id="show-seg"></div></div>
+            <div class="kg"><span class="lab" data-i18n="show">显示</span><div class="seg" id="show-seg"></div></div>
           </details>
           <div class="nearby" aria-live="polite">
             <p class="nearby-h" id="nearby-h"></p>
@@ -111,25 +114,29 @@
 
         <!-- 我的 -->
         <section class="view" id="view-me" aria-labelledby="tab-me">
+          <div class="me-card me-lang">
+            <h2 data-i18n="lang">语言</h2>
+            <div class="seg lang-seg" data-lang-seg role="radiogroup" aria-label="语言 / Language"></div>
+          </div>
           <div class="me-card">
-            <h2>口味档案</h2>
-            <p class="hint">推荐会按这里排序：喜欢的排前面，不喜欢的往后放。点一下 <b class="hint-yes">❤️ 喜欢</b>，点两下 <b class="hint-no">不喜欢</b>。</p>
+            <h2 data-i18n="meTaste">口味档案</h2>
+            <p class="hint" data-i18n-html="meTasteHint">推荐会按这里排序：喜欢的排前面，不喜欢的往后放。点一下 <b class="hint-yes">❤️ 喜欢</b>，点两下 <b class="hint-no">不喜欢</b>。</p>
             <div id="me-likes" class="mood-groups"></div>
-            <div class="kg"><span class="lab">辣</span><div class="seg" id="me-spice"></div></div>
-            <div class="kg"><span class="lab">素食</span><div class="seg" id="me-veg"></div></div>
-            <div class="kg"><span class="lab">人均</span><div><div class="seg" id="me-budget"></div><div class="hint small">人均价格数据还在补充，先记下来，补齐后生效。</div></div></div>
+            <div class="kg"><span class="lab" data-i18n="spice">辣</span><div class="seg" id="me-spice"></div></div>
+            <div class="kg"><span class="lab" data-i18n="veg">素食</span><div class="seg" id="me-veg"></div></div>
+            <div class="kg"><span class="lab" data-i18n="budget">人均</span><div><div class="seg" id="me-budget"></div><div class="hint small" data-i18n="budgetHint">人均价格数据还在补充，先记下来，补齐后生效。</div></div></div>
           </div>
           <div class="me-card">
             <div class="listhead"><h2 id="me-hist-h">吃过的</h2></div>
-            <p class="hint">最近 3 天吃过的店、昨天刚吃过的同类会往后排，换换口味；👎 的店不会再推荐。</p>
+            <p class="hint" data-i18n="meHistHint">最近 3 天吃过的店、昨天刚吃过的同类会往后排，换换口味；👎 的店不会再推荐。</p>
             <div id="me-hist" class="hlist"></div>
           </div>
           <div class="me-card">
-            <h2>备份和导入</h2>
-            <p class="hint">口味档案和记录只存在这台设备上。换手机、或者导入从 Uber 订单整理出来的口味档案时用这里。</p>
+            <h2 data-i18n="meBackup">备份和导入</h2>
+            <p class="hint" data-i18n="meBackupHint">口味档案和记录只存在这台设备上。换手机、或者导入从 Uber 订单整理出来的口味档案时用这里。</p>
             <div class="row">
-              <button type="button" class="btn" id="me-export">导出备份</button>
-              <label class="btn">导入文件<input type="file" id="me-import" accept=".json,application/json" hidden></label>
+              <button type="button" class="btn" id="me-export" data-i18n="exportBtn">导出备份</button>
+              <label class="btn"><span data-i18n="importBtn">导入文件</span><input type="file" id="me-import" accept=".json,application/json" hidden></label>
             </div>
           </div>
         </section>
@@ -143,16 +150,16 @@
 
       <aside class="mapcol">
         <div class="mapbox" id="mapbox">
-          <div id="map" aria-label="餐馆地图"></div>
-          <div class="maphint" id="maphint" hidden>点地图任意位置，设为出发点</div>
-          <button type="button" class="btn maptool" id="zme" title="回到出发点">◎ 回到出发点</button>
+          <div id="map" aria-label="餐馆地图" data-i18n-aria="mapAria"></div>
+          <div class="maphint" id="maphint" hidden data-i18n="mapHint">点地图任意位置，设为出发点</div>
+          <button type="button" class="btn maptool" id="zme" title="回到出发点" data-i18n="recenter" data-i18n-title="recenterTitle">◎ 回到出发点</button>
         </div>
         <div class="legend">
-          <span><i style="background:var(--me)"></i>出发点</span>
-          <span><i style="background:var(--ok)"></i>能吃上</span>
-          <span><i style="background:var(--warn)"></i>比较赶 / 等开门</span>
-          <span><i style="background:var(--bad)"></i>到时已关</span>
-          <span><i class="hollow"></i>时间未知</span>
+          <span><i style="background:var(--me)"></i><span data-i18n="lgMe">出发点</span></span>
+          <span><i style="background:var(--ok)"></i><span data-i18n="lgOk">能吃上</span></span>
+          <span><i style="background:var(--warn)"></i><span data-i18n="lgWarn">比较赶 / 等开门</span></span>
+          <span><i style="background:var(--bad)"></i><span data-i18n="lgBad">到时已关</span></span>
+          <span><i class="hollow"></i><span data-i18n="lgUnk">时间未知</span></span>
         </div>
       </aside>
     </div>
@@ -161,15 +168,16 @@
 
 <div class="toast" id="toast" role="status" hidden></div>
 <dialog id="about">
-  <h2>关于数据</h2>
+  <h2 data-i18n="about">关于数据</h2>
   <div id="foot"></div>
-  <form method="dialog"><button class="btn">知道了</button></form>
+  <form method="dialog"><button class="btn" data-i18n="aboutOk">知道了</button></form>
 </dialog>
 
 <!-- 数据先加载，再运行页面逻辑 -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
 <script src="data/food-data.js"></script>
 <script src="data/dish-data.js"></script>
+<script src="i18n.js"></script>
 <script src="app.js"></script>
 <script>if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js')</script>
 </body>
