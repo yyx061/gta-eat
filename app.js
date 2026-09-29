@@ -84,8 +84,13 @@ function parseOH(str){
   return out;
 }
 const schedCache=new Map();
+// Google 查到的评分和营业时间（只给看过的店查，存在这台设备上）：编号 → {id,t,r,n,url,st,iv}
+let GP=LS.get('gplace',{});
+const saveGP=()=>LS.set('gplace',GP);
+const gIv=p=>!overrides[p.oid]&&GP[p.oid]&&GP[p.oid].iv;
 function sched(p){
-  const src=overrides[p.oid]||p.oh||p.siteOh||p.ohChain;  // 优先级：自己补的 > OSM > 官网 > 连锁推测
+  const g=gIv(p); if(g) return g;  // 优先级：自己补的 > Google > OSM > 官网 > 连锁推测
+  const src=overrides[p.oid]||p.oh||p.siteOh||p.ohChain;
   const key=p.i+'|'+src;
   if(!schedCache.has(key)) schedCache.set(key,parseOH(src));
   return schedCache.get(key);
@@ -103,8 +108,8 @@ const normName=s=>s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g,'');
     for(const p of list) if(!p.oh) p.ohChain=best;
   }
 })();
-const isGuess=p=>!overrides[p.oid]&&!p.oh&&!p.siteOh&&!!p.ohChain;
-const fromSite=p=>!overrides[p.oid]&&!p.oh&&!!p.siteOh;
+const isGuess=p=>!gIv(p)&&!overrides[p.oid]&&!p.oh&&!p.siteOh&&!!p.ohChain;
+const fromSite=p=>!gIv(p)&&!overrides[p.oid]&&!p.oh&&!!p.siteOh;
 function openAt(iv,w){for(const [a,b] of iv){if(a<=w&&w<b)return b-w;if(a<=w+10080&&w+10080<b)return b-w-10080}return -1}
 function nextOpen(iv,w){let best=null;for(const [a] of iv){const d=((a-w)%10080+10080)%10080;if(d>0&&(best===null||d<best))best=d}return best}
 const hhmm=m=>{m=((m%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')};
@@ -206,7 +211,7 @@ function status(p,w0,tm){
   const at=w+nx, day=Math.floor((at%10080)/1440), sameDay=Math.floor(w/1440)===Math.floor(at/1440)&&nx<1440;
   return {k:'closed',t:t('stClosed',{day:sameDay?t('today'):DN[day],time:hhmm(at)})};
 }
-const statusOf=(p,w0,tm)=>{const st=status(p,w0,tm);if(st.k!=='unk'&&isGuess(p))st.t+=t('stChain');else if(st.k!=='unk'&&fromSite(p))st.t+=t('stSite');return st};
+const statusOf=(p,w0,tm)=>{const g=GP[p.oid];if(g&&(g.st==='CLOSED_PERMANENTLY'||g.st==='CLOSED_TEMPORARILY'))return {k:'closed',t:t(g.st==='CLOSED_PERMANENTLY'?'gClosedPerm':'gClosedTemp')};const st=status(p,w0,tm);if(st.k!=='unk'&&gIv(p))st.t+=t('stGoogle');else if(st.k!=='unk'&&isGuess(p))st.t+=t('stChain');else if(st.k!=='unk'&&fromSite(p))st.t+=t('stSite');return st};
 const RANK={ok:0,tight:1,soon:2,unk:3,closed:4};
 const visible=st=>S.show==='all'||['ok','tight','soon'].includes(st.k)||(S.show==='eat+unk'&&st.k==='unk');
 const row=(p,w0)=>{const d=dist(S.lat,S.lng,p.lat,p.lng), tm=tripMin(d);return {p,d,tm,st:statusOf(p,w0,tm),fit:taste(p,d)}};
@@ -305,6 +310,12 @@ function taste(p,d=0){  // {s:分数, why:[{t:原因, good:true/false}]}
   const why=[]; let s=0;
   const r=PER.rated[p.oid];
   if(r===-1) return {s:-9,why:[{t:t('whyRatedBad'),good:false}]};
+  const g=GP[p.oid];  // Google：关门了就不推荐；评论够多时按评分加减分
+  if(g&&(g.st==='CLOSED_PERMANENTLY'||g.st==='CLOSED_TEMPORARILY')) return {s:-9,why:[]};  // 已关门：不推荐（营业状态里会写明）
+  if(g&&g.r!=null&&g.n>=20){
+    if(g.r>=4.5){s+=1;why.push({t:t('whyGHigh',{r:g.r.toFixed(1)}),good:true})}
+    else if(g.r<3.8){s-=2.5;why.push({t:t('whyGLow',{r:g.r.toFixed(1)}),good:false})}
+  }
   if(r===1){s+=2;why.push({t:t('whyRatedGood'),good:true})}
   const lk=PER.like.find(([,t])=>t.test(p)); if(lk){s+=2;why.push({t:t('whyLike',{x:kwLabel(lk[0])}),good:true})}
   const dk=PER.dislike.find(([,t])=>t.test(p)); if(dk){s-=3;why.push({t:t('whyDislike',{x:kwLabel(dk[0])}),good:false})}
@@ -431,7 +442,7 @@ function renderPick(){
     <div class="ctx-line">${esc(ctxLine())}</div>
     <div class="pick-walk"><b class="num">${r.tm}</b>${esc(t('minUnit'))} · ${esc(modeL())} · ${distTxt(r.d)}</div>
     <div class="pn">${esc(p.name)}${p.zh&&p.zh!==p.name?`<small>${esc(p.zh)}</small>`:''}</div>
-    <div class="tags">${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
+    <div class="tags">${gHTML(p)}${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
     ${dishHTML(p)}
     ${whyHTML(r)}
     <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span></div>
@@ -446,6 +457,7 @@ function renderPick(){
     <div class="linger" id="linger" hidden></div>
     <div class="pick-count">${esc(t('poolCount',{n:okN,open:POOL[0]&&POOL[0].st.k==='ok'?t('poolOpen'):'',mine:personalized()?t('poolMine'):''}))}</div>
   </article>`;
+  gFetch(p);  // 抽中的这家：查 Google 评分和营业时间（有缓存就不查）
 }
 
 /* ---------- 看了但没选 / 选了：问一句为什么 ----------
@@ -506,6 +518,64 @@ function answerWhyPick(k,box){
   toast(t('toastOk'));
 }
 
+/* ---------- Google 评分和营业时间：只给正在看的店查 ----------
+   第一步 Text Search 只要 id（这个 SKU 免费、不限量），id 存下来以后不再找；
+   第二步 Place Details 拿评分、评论数、营业时间（Enterprise SKU，每月 1000 次免费）。
+   key 只存在这台设备上（「我的」里填），不进 GitHub；App 里每天最多查 GDAILY 次，Google 后台另设每日上限。 */
+const GDAILY=30;
+const gKey=()=>LS.get('gkey','');
+function gUsage(){const d=new Date().toISOString().slice(0,10),u=LS.get('gcount',null);return u&&u.d===d?u:{d,n:0}}
+const gPending=new Set(); let gErr='';
+function gToIv(periods){  // Google 的 periods（周日=0）→ 我们的周分钟区间（周一=0）
+  const out=[];
+  for(const pr of periods||[]){
+    if(!pr.open) continue;
+    const o=((pr.open.day+6)%7)*1440+pr.open.hour*60+(pr.open.minute||0);
+    if(!pr.close) return [[0,10080]];  // 没有关门时间 = 24 小时营业
+    let c=((pr.close.day+6)%7)*1440+pr.close.hour*60+(pr.close.minute||0); if(c<=o) c+=10080;
+    out.push([o,c]);
+  }
+  return out.length?out:null;
+}
+async function gFetch(p){
+  const key=gKey(); if(!key||!p||gPending.has(p.oid)) return;
+  const c=GP[p.oid];
+  if(c&&(Date.now()-c.t<DAY||(c.none&&Date.now()-c.t<7*DAY))) return;  // 一天内查过就用缓存；没找到的一周内不再找
+  const u=gUsage(); if(u.n>=GDAILY) return;
+  gPending.add(p.oid); refreshG(p.oid);
+  try{
+    const H={'X-Goog-Api-Key':key};
+    let id=c&&c.id;
+    if(!id){
+      const r=await fetch('https://places.googleapis.com/v1/places:searchText',{method:'POST',headers:{...H,'Content-Type':'application/json','X-Goog-FieldMask':'places.id'},
+        body:JSON.stringify({textQuery:[p.name,p.addr,p.city].filter(Boolean).join(' '),locationBias:{circle:{center:{latitude:p.lat,longitude:p.lng},radius:300}},pageSize:1})});
+      const j=await r.json(); if(!r.ok) throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
+      id=j.places&&j.places[0]&&j.places[0].id;
+      if(!id){GP[p.oid]={t:Date.now(),none:1};saveGP();return}
+    }
+    u.n++; LS.set('gcount',u);
+    const r=await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}?languageCode=${LANG==='zh'?'zh-CN':'en'}`,
+      {headers:{...H,'X-Goog-FieldMask':'id,location,rating,userRatingCount,currentOpeningHours,regularOpeningHours,businessStatus,googleMapsUri'}});
+    const d=await r.json(); if(!r.ok) throw new Error((d.error&&d.error.message)||('HTTP '+r.status));
+    // 核对位置：差 400 米以上多半是找错了店，不用它的评分
+    if(d.location&&dist(p.lat,p.lng,d.location.latitude,d.location.longitude)>400){GP[p.oid]={t:Date.now(),none:1};saveGP();return}
+    GP[p.oid]={id,t:Date.now(),r:d.rating??null,n:d.userRatingCount||0,url:d.googleMapsUri||'',st:d.businessStatus||'',
+      iv:gToIv((d.currentOpeningHours||d.regularOpeningHours||{}).periods)};
+    saveGP(); gErr='';
+  }catch(e){ gErr=String(e.message||e).slice(0,160) }
+  finally{ gPending.delete(p.oid); schedCache.clear(); update(); if(S.view==='me') renderMe() }
+}
+function refreshG(oid){ document.querySelectorAll(`[data-g="${CSS.escape(oid)}"]`).forEach(el=>{el.outerHTML=gHTML(P.find(p=>p.oid===oid))}) }
+function gHTML(p){  // 卡片上的 Google 评分
+  if(!p||!gKey()) return '';
+  const g=GP[p.oid], a=`data-g="${esc(p.oid)}"`;
+  if(gPending.has(p.oid)) return `<span class="grate loading" ${a}>${esc(t('gLoading'))}</span>`;
+  if(!g||g.none) return `<span ${a} hidden></span>`;
+  if(g.st==='CLOSED_PERMANENTLY'||g.st==='CLOSED_TEMPORARILY') return `<span ${a} hidden></span>`;  // 关门的状态已经显示在营业状态里
+  if(g.r==null) return `<span ${a} hidden></span>`;
+  return `<a class="grate" ${a} href="${/^https:\/\//.test(g.url)?esc(g.url):gmaps(p)}" target="_blank" rel="noopener">⭐ <b class="num">${g.r.toFixed(1)}</b> <small>${esc(t('gReviews',{n:g.n.toLocaleString()}))}</small></a>`;
+}
+
 /* ---------- 找一家 ---------- */
 function renderKW(){
   const cu=KW[0];
@@ -532,7 +602,7 @@ function card(r){
   return `<div class="card${sel?' sel':''}" data-o="${esc(p.oid)}" id="c-${esc(p.oid)}">
     <div class="walk"><b>${r.tm}</b><span>${esc(t('minUnit'))}</span></div>
     <div><div class="cn">${esc(p.name)}${p.zh&&p.zh!==p.name?`<small>${esc(p.zh)}</small>`:''}</div>
-      <div class="tags">${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}<span class="num">${distTxt(r.d)}</span>${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
+      <div class="tags">${gHTML(p)}${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}<span class="num">${distTxt(r.d)}</span>${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
       ${dishHTML(p)}
       ${whyHTML(r)}
       <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span></div></div>
@@ -564,6 +634,8 @@ function renderMe(){
   segBtns($('me-spice'),[['',t('spiceUnset')],['0',t('spice0')],['1',t('spice1')],['2',t('spice2')]],PROF.spice==null?'':PROF.spice,v=>{PROF.spice=v===''?null:+v;profChanged()});
   segBtns($('me-veg'),[['0',t('vegAny')],['1',t('vegPref')]],PROF.veg?'1':'0',v=>{PROF.veg=v==='1';profChanged()});
   segBtns($('me-budget'),[['',t('budgetAny')],...[15,25,40].map(n=>[String(n),t('budgetUpTo',{n})])],PROF.budget==null?'':PROF.budget,v=>{PROF.budget=v===''?null:+v;profChanged()});
+  const gu=gUsage();
+  $('g-status').textContent=gKey()?t('gStatusOn',{n:gu.n,max:GDAILY})+(gErr?' · '+t('gErrTxt',{e:gErr}):''):t('gStatusOff');
   segBtns($('me-ask'),[['1',t('askOn')],['0',t('askOff')]],PROF.noAsk?'0':'1',v=>{PROF.noAsk=v==='0';profChanged()});
   const hs=[...HIST].sort((a,b)=>b.t-a.t).slice(0,50);
   $('me-hist-h').textContent=HIST.length?t('meHistN',{n:HIST.length}):t('meHist');
@@ -626,7 +698,7 @@ function fitRange(){if(ring&&maxDist()>0)map.fitBounds(ring.getBounds(),{padding
 function popHTML(r){
   const p=r.p;
   return `<div class="pp-name">${esc(p.name)}${p.zh&&p.zh!==p.name?` <small>${esc(p.zh)}</small>`:''}</div>
-    <div class="tags">${tagHTML(p)}<span>${tripTxt(r)}</span></div>${dishHTML(p)}
+    <div class="tags">${gHTML(p)}${tagHTML(p)}<span>${tripTxt(r)}</span></div>${dishHTML(p)}
     <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span></div>
     <button type="button" class="pp-go" data-go="${esc(p.oid)}">${esc(t(S.view==='rand'?'ppPick':'ppList'))}</button>`;
 }
@@ -688,6 +760,7 @@ function select(oid,scroll){
   // 找一家：展开看了 8 秒以上、什么都没做就换去看别的（或者收起来），问一句
   if(prev.oid&&prev.oid!==selected&&!prev.acted&&Date.now()-prev.at>ASK_VIEW&&!askedSkip.has(prev.oid)&&canAsk()) askSkip(prev.oid);
   fseen=selected?{oid:selected,at:Date.now(),acted:false}:{oid:null,at:0,acted:false};
+  if(selected) gFetch(P.find(x=>x.oid===selected));  // 展开一家：查 Google 评分和营业时间
   if(scroll){const idx=RES.findIndex(x=>x.p.oid===oid);if(idx>=limit){limit=idx+10}}
   renderPanel();draw(false);
   if(scroll){const el=document.getElementById('c-'+oid);if(el)el.scrollIntoView({behavior:'smooth',block:'nearest'})}
@@ -1013,6 +1086,8 @@ document.addEventListener('click',e=>{
 });
 $('quiz').addEventListener('cancel',()=>LS.set('onboarded',true));  // Esc 关掉也算跳过
 $('qz-redo').onclick=()=>quizOpen();
+$('g-save').onclick=()=>{const v=$('g-key').value.trim();if(!v)return;LS.set('gkey',v);$('g-key').value='';gErr='';toast(t('gSaved'));update();renderMe()};
+$('g-clear').onclick=()=>{LS.set('gkey','');toast(t('gCleared'));update();renderMe()};
 
 /* ---------- 切换语言 ---------- */
 function applyStatic(){  // index.html 里带 data-i18n 的静态文字

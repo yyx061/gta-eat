@@ -131,6 +131,12 @@
             <div class="kg"><span class="lab" data-i18n="budget">人均</span><div><div class="seg" id="me-budget"></div><div class="hint small" data-i18n="budgetHint">人均价格数据还在补充，先记下来，补齐后生效。</div></div></div>
           </div>
           <div class="me-card">
+            <h2 data-i18n="gTitle">Google 评分和营业时间</h2>
+            <p class="hint" data-i18n="gHint">填上你自己的 Google Maps key 后，看到的店会显示 Google 评分和最新营业时间。key 只存在这台设备上。</p>
+            <div class="row"><input id="g-key" class="in grow" type="password" autocomplete="off" spellcheck="false" data-i18n-ph="gKeyPh" placeholder="粘贴 Google Maps API key"><button type="button" class="btn primary" id="g-save" data-i18n="gSave">保存</button><button type="button" class="btn ghost" id="g-clear" data-i18n="gClear">清除</button></div>
+            <div class="hint small" id="g-status"></div>
+          </div>
+          <div class="me-card">
             <div class="listhead"><h2 id="me-hist-h">吃过的</h2></div>
             <p class="hint" data-i18n="meHistHint">最近 3 天吃过的店、昨天刚吃过的同类会往后排，换换口味；👎 的店不会再推荐。</p>
             <div id="me-hist" class="hlist"></div>
