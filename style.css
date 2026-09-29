@@ -183,6 +183,7 @@ a{color:var(--accent)}
 .cn small{font-weight:400;color:var(--muted);margin-left:6px;font-size:13px}
 .tags{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;color:var(--muted);margin-top:3px}
 .tags .t{color:var(--ink)}
+.tags .price{color:var(--ink);font-size:12px}
 .dishes{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 6px;margin-top:7px;font-size:13px}
 .dishes .d{background:var(--dish-soft);color:var(--dish);border-radius:6px;padding:1px 8px;font-weight:500}
 .dishes .src{font-size:11px;color:var(--faint);margin-left:2px}
@@ -261,6 +262,37 @@ dialog.quiz[open]{display:flex}
 .qz-hit small{color:var(--muted);font-size:12px}
 .quiz .cards .more{display:none}
 @media (prefers-reduced-motion:reduce){.qz-prog span{transition:none}}
+
+/* ---------- 滑动卡片 ---------- */
+.sw-count{font-size:12px;color:var(--faint);text-align:center}
+.sw-stack{position:relative;height:300px;display:grid;place-items:center}
+.sw-card{position:relative;width:min(300px,86%);height:280px;border-radius:22px;background:var(--surface);border:1px solid var(--line);box-shadow:0 18px 40px -18px rgba(23,32,28,.45),0 0 0 6px var(--sunk);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:20px;text-align:center;touch-action:none;user-select:none;cursor:grab}
+.sw-card:active{cursor:grabbing}
+.sw-emoji{font-size:84px;line-height:1}
+.sw-name{font-family:var(--display);font-weight:800;font-size:28px;letter-spacing:-.01em}
+.sw-ex{font-size:13px;color:var(--muted)}
+.sw-prev{font-size:12px;color:var(--faint)}
+.sw-stamp{position:absolute;top:18px;font-size:34px;opacity:0;transition:opacity .1s}
+.sw-stamp.like{left:22px}.sw-stamp.no{right:22px}
+.sw-card[data-lean="like"]{border-color:var(--accent)}.sw-card[data-lean="like"] .sw-stamp.like{opacity:1}
+.sw-card[data-lean="no"]{border-color:var(--bad)}.sw-card[data-lean="no"] .sw-stamp.no{opacity:1}
+.sw-btns{display:flex;justify-content:center;align-items:center;gap:14px}
+.sw-btn{appearance:none;border:1px solid var(--line);background:var(--surface);border-radius:999px;cursor:pointer;display:grid;place-items:center;font-size:24px}
+.sw-btn small{font-size:11px;color:var(--muted)}
+.sw-btn.no,.sw-btn.like{width:74px;height:74px}
+.sw-btn.like{border-color:var(--accent)}.sw-btn.no{border-color:var(--bad)}
+.sw-btn.meh{font-size:13px;padding:8px 14px;color:var(--muted)}
+.sw-btn:hover{background:var(--sunk)}
+.qz-ctx{display:grid;gap:6px;padding:10px 0;border-top:1px solid var(--line)}
+.qz-ctx:first-of-type{border-top:0}
+.qz-ctx-q{font-weight:500}
+
+/* ---------- 场合、看了没选 ---------- */
+.ctx-line{font-size:12px;color:var(--muted)}
+.linger{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--accent-soft);border-radius:var(--r);padding:8px 10px;font-size:14px}
+.skip-ask{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--sunk);border-radius:var(--r-lg);padding:10px 12px;font-size:14px}
+.skip-ask .linkbtn{margin-left:auto;text-decoration:none;color:var(--faint)}
 
 /* ---------- 窄屏 ---------- */
 @media (max-width:1100px){

@@ -88,6 +88,7 @@
             <span class="hint" data-i18n-html="moodHint">想吃点什么？点一下 <b class="hint-yes">想吃</b>，点两下 <b class="hint-no">不想吃</b>，不选就完全随机</span>
             <div id="moods" class="mood-groups"></div>
           </div>
+          <div class="skip-ask" id="skip-ask" role="status" hidden></div>
           <div id="pick"></div>
         </section>
 
@@ -124,6 +125,7 @@
             <div id="me-likes" class="mood-groups"></div>
             <div class="row"><button type="button" class="btn" id="qz-redo" data-i18n="qzRedo">重新做口味问卷</button></div>
             <div class="kg"><span class="lab" data-i18n="spice">辣</span><div class="seg" id="me-spice"></div></div>
+            <div class="kg"><span class="lab" data-i18n="askLab">追问</span><div><div class="seg" id="me-ask"></div><div class="hint small" data-i18n="askHint">看了一家却换掉时，问一句为什么，推荐会更准。</div></div></div>
             <div class="kg"><span class="lab" data-i18n="veg">素食</span><div class="seg" id="me-veg"></div></div>
             <div class="kg"><span class="lab" data-i18n="budget">人均</span><div><div class="seg" id="me-budget"></div><div class="hint small" data-i18n="budgetHint">人均价格数据还在补充，先记下来，补齐后生效。</div></div></div>
           </div>
@@ -181,7 +183,7 @@
 <!-- 数据先加载，再运行页面逻辑 -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
 <script src="data/food-data.js"></script>
-<script src="data/dish-data.js"></script>
+<script src="data/site-data.js"></script>
 <script src="i18n.js"></script>
 <script src="app.js"></script>
 <script>if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js')</script>

@@ -15,9 +15,11 @@
 | `data/food-data.js` | 约 2.8 万家店（脚本合并生成，不要手改） |
 | `scripts/src/osm-food-data.js` | 原始 OpenStreetMap 数据（合并的输入，不要改） |
 | `scripts/merge_places.py` | 合并 OSM + Overture + DineSafe，生成 `data/food-data.js` |
-| `data/dish-data.js` | 特色菜（脚本生成，不要手改） |
-| `scripts/dishes.mjs` | 用 DeepSeek 提炼特色菜（需要 `.env` 里的 `DEEPSEEK_API_KEY`） |
-| `scripts/build-dish-data.mjs` | 把 `scripts/out/` 的结果合并成 `data/dish-data.js` |
+| `data/site-data.js` | 从店家官网提取的营业时间、人均、招牌菜（脚本生成，不要手改） |
+| `i18n.js` | 中英文界面文字 |
+| `scripts/site_info.mjs` | 读店家官网，用 DeepSeek 提取营业时间、招牌菜、人均（需要 `.env` 里的 `DEEPSEEK_API_KEY`） |
+| `scripts/build-site-data.mjs` | 把 `scripts/out/siteinfo.jsonl` 合并成 `data/site-data.js` |
+| `scripts/dishes.mjs` | 早期的招牌菜试跑脚本 |
 | `backup-v1/` | 改版前的旧界面 |
 
 ## 常改的地方（都在 `app.js`）
@@ -48,7 +50,7 @@ scripts/.venv/bin/python scripts/merge_places.py
 ## 特色菜
 ```
 node scripts/dishes.mjs 纬度 经度 半径km 数量   # 例：node scripts/dishes.mjs 43.6529 -79.3980 1.5 40
-node scripts/build-dish-data.mjs
+node scripts/build-site-data.mjs
 ```
 有官网的店读官网菜单（含 PDF，JS 网站用本机 Chrome 渲染），没有的再问 DeepSeek 或按店名推断，网页上会标明来源。
 地图底图来自 Esri（免 key），需要联网。

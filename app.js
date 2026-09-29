@@ -28,8 +28,10 @@ const cz=c=>LANG==='zh'?(ZH[c]||c.replace(/_/g,' ')):(I18N.en.cuisine[c]||cap(c.
 const typeName=i=>t('types')[i];
 
 /* ---------- places ---------- */
-const DISH=window.DISH_DATA||{};
-const P=DATA.rows.map((r,i)=>({i,name:r[0],zh:r[1],lat:r[2],lng:r[3],type:r[4],cu:r[5].map(k=>CUI[k]),oh:r[6],addr:r[7],city:r[8],veg:r[9],take:r[10],web:r[11],oid:r[12],phone:r[13]||'',src:r[14]||'o',ds:r[15]||'',dish:DISH[r[12]]}));
+// 官网提取的营业时间、人均、招牌菜（scripts/build-site-data.mjs 生成）
+const SITE=window.SITE_DATA||{};
+const P=DATA.rows.map((r,i)=>{const x=SITE[r[12]]||{};return {i,name:r[0],zh:r[1],lat:r[2],lng:r[3],type:r[4],cu:r[5].map(k=>CUI[k]),oh:r[6],addr:r[7],city:r[8],veg:r[9],take:r[10],web:r[11],oid:r[12],phone:r[13]||'',src:r[14]||'o',ds:r[15]||'',
+  siteOh:x.h||'',price:x.p?{min:x.p[0],max:x.p[1]}:null,dish:x.d?{s:x.s||'site',d:x.d}:null}});
 let overrides=LS.get('oh',{});
 let favs=new Set(LS.get('favs',[]));
 
@@ -83,7 +85,7 @@ function parseOH(str){
 }
 const schedCache=new Map();
 function sched(p){
-  const src=overrides[p.oid]||p.oh||p.ohChain;
+  const src=overrides[p.oid]||p.oh||p.siteOh||p.ohChain;  // 优先级：自己补的 > OSM > 官网 > 连锁推测
   const key=p.i+'|'+src;
   if(!schedCache.has(key)) schedCache.set(key,parseOH(src));
   return schedCache.get(key);
@@ -101,7 +103,8 @@ const normName=s=>s.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g,'');
     for(const p of list) if(!p.oh) p.ohChain=best;
   }
 })();
-const isGuess=p=>!overrides[p.oid]&&!p.oh&&!!p.ohChain;
+const isGuess=p=>!overrides[p.oid]&&!p.oh&&!p.siteOh&&!!p.ohChain;
+const fromSite=p=>!overrides[p.oid]&&!p.oh&&!!p.siteOh;
 function openAt(iv,w){for(const [a,b] of iv){if(a<=w&&w<b)return b-w;if(a<=w+10080&&w+10080<b)return b-w-10080}return -1}
 function nextOpen(iv,w){let best=null;for(const [a] of iv){const d=((a-w)%10080+10080)%10080;if(d>0&&(best===null||d<best))best=d}return best}
 const hhmm=m=>{m=((m%1440)+1440)%1440;return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')};
@@ -203,10 +206,10 @@ function status(p,w0,tm){
   const at=w+nx, day=Math.floor((at%10080)/1440), sameDay=Math.floor(w/1440)===Math.floor(at/1440)&&nx<1440;
   return {k:'closed',t:t('stClosed',{day:sameDay?t('today'):DN[day],time:hhmm(at)})};
 }
-const statusOf=(p,w0,tm)=>{const st=status(p,w0,tm);if(st.k!=='unk'&&isGuess(p))st.t+=t('stChain');return st};
+const statusOf=(p,w0,tm)=>{const st=status(p,w0,tm);if(st.k!=='unk'&&isGuess(p))st.t+=t('stChain');else if(st.k!=='unk'&&fromSite(p))st.t+=t('stSite');return st};
 const RANK={ok:0,tight:1,soon:2,unk:3,closed:4};
 const visible=st=>S.show==='all'||['ok','tight','soon'].includes(st.k)||(S.show==='eat+unk'&&st.k==='unk');
-const row=(p,w0)=>{const d=dist(S.lat,S.lng,p.lat,p.lng), tm=tripMin(d);return {p,d,tm,st:statusOf(p,w0,tm),fit:taste(p)}};
+const row=(p,w0)=>{const d=dist(S.lat,S.lng,p.lat,p.lng), tm=tripMin(d);return {p,d,tm,st:statusOf(p,w0,tm),fit:taste(p,d)}};
 function matches(p,ids,q){
   // 带 ! 前缀的是「不想吃」：命中任何一个就排除，优先级最高
   for(const id of ids) if(id[0]==='!'){const t=kwTest(id.slice(1));if(t&&t.test(p)) return false}
@@ -235,11 +238,69 @@ function persona(){  // 每次档案或记录变了重新整理一次，compute 
     if(age<1.5) for(const c of h.cu||[]) recentCu[c]=1;
   }
   const tests=(pos)=>PROF.likes.filter(x=>(x[0]==='!')!==pos).map(x=>x.replace(/^!/,'')).map(id=>[id,kwTest(id)]).filter(x=>x[1]);
-  PER={rated,recentStore,recentCu,like:tests(true),dislike:tests(false)};
+  // C：每种场合（工作日/周末 × 时段）下常吃、没给过 👎 的菜系
+  const habit={};
+  for(const h of HIST){ if(!h.ctx||h.r===-1) continue; const m=habit[h.ctx]||(habit[h.ctx]={}); for(const c of h.cu||[]) m[c]=(m[c]||0)+1 }
+  const tmpNo=LS.get('tmpNo',[]).filter(x=>x.until>now);  // 「没选这家：不想吃这类」，同一场合下 1 天内生效
+  PER={rated,recentStore,recentCu,like:tests(true),dislike:tests(false),habit,tmpNo};
 }
 persona();
+
+/* ---------- 场合：时间段、星期几、天气 ---------- */
+// A 默认规则；B 问卷里的场合题（PROF.ctx）会改掉对应的默认；C 从吃过的记录里学（PER.habit）
+const slotOf=m=>m<300?'late':m<660?'breakfast':m<840?'lunch':m<1020?'afternoon':m<1260?'dinner':'late';
+let WX=LS.get('wx',null);  // 天气缓存 {lat,lng,t,temp,wet,snow}
+async function loadWeather(){  // Open-Meteo，免费、不用 key；只在「现在出发」时用
+  if(S.when!=='now') return;
+  if(WX&&Date.now()-WX.t<30*60e3&&Math.abs(WX.lat-S.lat)<0.05&&Math.abs(WX.lng-S.lng)<0.05) return;
+  try{
+    const u=`https://api.open-meteo.com/v1/forecast?latitude=${S.lat.toFixed(3)}&longitude=${S.lng.toFixed(3)}&current=temperature_2m,precipitation,weather_code&timezone=America%2FToronto`;
+    const c=(await (await fetch(u)).json()).current, code=c.weather_code;
+    WX={lat:S.lat,lng:S.lng,t:Date.now(),temp:c.temperature_2m,wet:c.precipitation>0.05||(code>=51&&code<=67)||(code>=71&&code<=86)||code>=95,snow:(code>=71&&code<=77)||code===85||code===86};
+    LS.set('wx',WX); update();
+  }catch(e){}
+}
+let CTX={};
+function ctxNow(){
+  const w=startW(), dow=Math.floor(w/1440)%7, slot=slotOf(w%1440), weekday=dow<=4;
+  const wx=S.when==='now'&&WX&&Date.now()-WX.t<3*3600e3?WX:null;
+  return {dow,slot,weekday,key:(weekday?'wd':'we')+':'+slot,friNight:(dow===4||dow===5)&&(slot==='dinner'||slot==='late'),
+    wet:!!(wx&&wx.wet),snow:!!(wx&&wx.snow),cold:!!(wx&&wx.temp<5),hot:!!(wx&&wx.temp>28),temp:wx?Math.round(wx.temp):null};
+}
+const kwIs=(id,p)=>{const k=kwTest(id);return !!k&&k.test(p)};
+function ctxBoost(p,d){  // 返回 [加分, 原因]；一家店只给一个场合原因，免得卡片太乱
+  const c=CTX, pref=PROF.ctx||{}, near=Math.max(0,1-d/Math.max(maxDist(),1));
+  if(c.wet||c.cold||c.snow){
+    const want=pref.rain||'soup';
+    const hit=want==='hotpot'?has(p,['hotpot','hot_pot']):want==='soup'?kwIs('想吃点:热汤面',p):false;
+    return hit?[1.5+near*0.5,t(c.snow?'ctxSnow':c.wet?'ctxRain':'ctxCold')]:[near*0.5,null];  // 天不好，近的也加一点
+  }
+  if(c.hot&&['想吃点:甜品','想吃点:奶茶','想吃点:三明治/轻食'].some(id=>kwIs(id,p))) return [1,t('ctxHot')];
+  if(c.slot==='breakfast'&&(kwIs('想吃点:早餐',p)||kwIs('想吃点:咖啡',p))) return [1.5,t('ctxBreakfast')];
+  if(c.slot==='afternoon'&&['想吃点:甜品','想吃点:奶茶','想吃点:咖啡'].some(id=>kwIs(id,p))) return [1,t('ctxTea')];
+  if(c.weekday&&c.slot==='lunch'){
+    const want=pref.lunch||'quick';
+    if(want==='quick'&&(p.type===1||p.type===3||near>0.6)) return [1+near,t('ctxLunch')];
+    if(want==='sit'&&p.type===0) return [1,t('ctxLunchSit')];
+    return [0,null];
+  }
+  if(c.friNight){
+    const want=pref.fri||'sit';
+    if(want==='bold'&&(kwIs('想吃点:辣的',p)||kwIs('想吃点:烤肉',p))) return [1.5,t('ctxFriBold')];
+    if(want==='sit'&&p.type===0) return [1,t('ctxFri')];
+    return [0,null];
+  }
+  if(c.slot==='late'&&lateNight(p)) return [1,t('ctxLate')];
+  return [0,null];
+}
+function ctxLine(){  // 「随便吃」上方的一句场合说明
+  const c=CTX, parts=[t('slot_'+c.slot+(c.weekday?'':'_we'))];
+  if(c.temp!=null) parts.push((c.snow?'🌨️ ':c.wet?'☔ ':c.cold?'🥶 ':c.hot?'☀️ ':'')+c.temp+'°C');
+  return parts.join(' · ');
+}
+
 const agoTxt=d=>t(d<1?'ago0':d<2?'ago1':'ago2');
-function taste(p){  // {s:分数, why:[{t:原因, good:true/false}]}
+function taste(p,d=0){  // {s:分数, why:[{t:原因, good:true/false}]}
   const why=[]; let s=0;
   const r=PER.rated[p.oid];
   if(r===-1) return {s:-9,why:[{t:t('whyRatedBad'),good:false}]};
@@ -248,9 +309,20 @@ function taste(p){  // {s:分数, why:[{t:原因, good:true/false}]}
   const dk=PER.dislike.find(([,t])=>t.test(p)); if(dk){s-=3;why.push({t:t('whyDislike',{x:kwLabel(dk[0])}),good:false})}
   if(PROF.spice===0&&p.cu.some(c=>SPICY_CU.includes(c))){s-=1.5;why.push({t:t('whySpicy'),good:false})}
   if(PROF.veg&&(p.veg||has(p,['vegetarian','vegan']))){s+=1.5;why.push({t:t('whyVeg'),good:true})}
+  if(PROF.budget&&p.price){  // 只有有人均数据的店才按预算调整
+    if(p.price.min>PROF.budget){s-=2;why.push({t:t('whyOverBudget'),good:false})}
+    else if(p.price.max<=PROF.budget){s+=0.5;why.push({t:t('whyInBudget'),good:true})}
+  }
   const rs=PER.recentStore[p.oid];
   if(rs!=null){s-=2.5;why.push({t:t('whyRecent',{ago:agoTxt(rs)}),good:false})}
   else if(p.cu.some(c=>PER.recentCu[c])){s-=1;why.push({t:t('whyRecentCu'),good:false})}
+  // 场合
+  const [cb,cr]=ctxBoost(p,d); if(cb){s+=cb;if(cr)why.push({t:cr,good:true})}
+  const hb=PER.habit[CTX.key]; if(hb&&p.cu.some(c=>hb[c]>=2)){s+=1;why.push({t:t('ctxHabit',{slot:t('slot_'+CTX.slot+(CTX.weekday?'':'_we'))}),good:true})}
+  // 「没选这家」的回答
+  if(PER.tmpNo.some(x=>x.key===CTX.key&&x.cu.some(c=>p.cu.includes(c)))){s-=2;why.push({t:t('whyTmpNo'),good:false})}
+  if(PROF.nearBias) s-=PROF.nearBias*d/Math.max(maxDist(),1);
+  if(PROF.softBudget&&p.price&&p.price.min>=PROF.softBudget&&!(PROF.budget&&p.price.min>PROF.budget)){s-=1;why.push({t:t('whyPricey'),good:false})}
   return {s,why};
 }
 const personalized=()=>PROF.likes.length>0||HIST.length>0||PROF.spice===0||PROF.veg;
@@ -261,6 +333,7 @@ function whyHTML(r){
 
 let NEAR=[], RES=[], POOL=[], FAV=[], HROWS=[], limit=40, selected=null, picked=null;
 function compute(){
+  CTX=ctxNow();
   const w0=startW(), maxD=maxDist(), q=S.q.trim().toLowerCase();
   const dLat=maxD/111000, dLng=maxD/(111000*Math.cos(S.lat*rad));
   NEAR=[]; RES=[];
@@ -292,6 +365,7 @@ function dishHTML(p){
   // 中文界面显示中文菜名、英文界面显示原文菜名（没有就用中文），另一个放在悬停提示里
   return `<div class="dishes"><span class="lab">${t('signature')}</span>${p.dish.d.map(([a,b])=>{const [m,o]=LANG==='zh'||!b?[a,b]:[b,a];return `<span class="d"${o?` title="${esc(o)}"`:''}>${esc(m)}</span>`}).join('')}<span class="src">${SRC[p.dish.s]?t(SRC[p.dish.s]):''}</span></div>`;
 }
+const priceHTML=p=>p.price?`<span class="price num">${esc(t('priceTag',{min:p.price.min,max:p.price.max}))}</span>`:'';
 const tagHTML=p=>[...new Set(p.cu.map(cz))].slice(0,4).map(t=>`<span class="t">${esc(t)}</span>`).join('');
 const telHTML=p=>p.phone?`<a href="tel:${esc(p.phone.replace(/[^+\d]/g,''))}">📞 ${esc(p.phone.replace(/^\+1\s?/,''))}</a>`:'';
 function srcHTML(p){
@@ -349,10 +423,12 @@ function renderPick(){
     return;
   }
   const p=r.p, okN=POOL.length;
+  if(seen.oid!==p.oid) trackPick(p.oid);
   $('pick').innerHTML=`<article class="pick">
+    <div class="ctx-line">${esc(ctxLine())}</div>
     <div class="pick-walk"><b class="num">${r.tm}</b>${esc(t('minUnit'))} · ${esc(modeL())} · ${distTxt(r.d)}</div>
     <div class="pn">${esc(p.name)}${p.zh&&p.zh!==p.name?`<small>${esc(p.zh)}</small>`:''}</div>
-    <div class="tags">${tagHTML(p)}<span>${typeName(p.type)}</span>${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
+    <div class="tags">${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
     ${dishHTML(p)}
     ${whyHTML(r)}
     <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span></div>
@@ -363,8 +439,38 @@ function renderPick(){
       <a class="btn ghost" href="${gmaps(p)}" target="_blank" rel="noopener">${esc(t('seeReviews'))}</a>${r.st.k==='unk'&&p.phone?`<a class="btn ghost" href="tel:${esc(p.phone.replace(/[^+\d]/g,''))}">${esc(t('callHours'))}</a>`:''}
       <button class="star" type="button" data-fav="${esc(p.oid)}" aria-pressed="${favs.has(p.oid)}" title="${esc(t('fav'))}">★</button>
     </div>
+    <div class="linger" id="linger" hidden></div>
     <div class="pick-count">${esc(t('poolCount',{n:okN,open:POOL[0]&&POOL[0].st.k==='ok'?t('poolOpen'):'',mine:personalized()?t('poolMine'):''}))}</div>
   </article>`;
+}
+
+/* ---------- 看了但没选：问一句为什么（不打扰：同一家只问一次、两次至少隔 3 分钟、可以在「我的」里关掉）---------- */
+let seen={oid:null,at:0,engaged:false,acted:false,timer:null};
+const askedSkip=new Set();
+function trackPick(oid){ clearTimeout(seen.timer); seen={oid,at:Date.now(),engaged:false,acted:false,timer:setTimeout(askLinger,40e3)} }
+const canAsk=()=>!PROF.noAsk&&Date.now()-LS.get('askT',0)>180e3;
+function askLinger(){  // 停留 40 秒还没动：要去吗？
+  const box=$('linger');
+  if(!box||document.hidden||seen.acted||S.view!=='rand'||seen.oid!==picked||!canAsk()) return;
+  LS.set('askT',Date.now());
+  box.hidden=false;
+  box.innerHTML=`<span>${esc(t('lingerQ'))}</span><a class="btn primary" href="${gdir(P.find(p=>p.oid===seen.oid))}" target="_blank" rel="noopener" data-nav="${esc(seen.oid)}">${esc(t('goNav'))}</a><button type="button" class="btn ghost" data-linger-no>${esc(t('lingerNo'))}</button>`;
+}
+function askSkip(oid){  // 换一家时：刚才那家为什么没选？
+  const p=P.find(x=>x.oid===oid); if(!p) return;
+  askedSkip.add(oid); LS.set('askT',Date.now());
+  const box=$('skip-ask'); box.hidden=false; box.dataset.oid=oid;
+  box.innerHTML=`<span>${t('skipQ',{name:esc(p.name)})}</span><span class="chips small">${['far','cu','price','hours','look'].map(k=>`<button type="button" class="chip" data-skip="${k}">${esc(t('skip_'+k))}</button>`).join('')}</span><button type="button" class="linkbtn" data-skip="x" aria-label="${esc(t('close'))}">✕</button>`;
+}
+function answerSkip(k){
+  const box=$('skip-ask'), p=P.find(x=>x.oid===box.dataset.oid); box.hidden=true;
+  if(!p||k==='x') return;
+  if(k==='far') PROF.nearBias=Math.min(2,(PROF.nearBias||0)+0.7);
+  else if(k==='cu'){const l=LS.get('tmpNo',[]).filter(x=>x.until>Date.now());l.push({cu:p.cu,key:CTX.key,until:Date.now()+DAY});LS.set('tmpNo',l)}
+  else if(k==='price'&&p.price) PROF.softBudget=Math.min(PROF.softBudget||999,p.price.min);
+  else if(k==='hours'&&S.show!=='eat'){S.show='eat';save();renderControls()}
+  if(k!=='look'){profChanged();compute();if(!POOL.some(r=>r.p.oid===picked))roll();renderPick();draw(false)}
+  toast(t(k==='look'?'toastOk':k==='hours'?'skipHoursDone':k==='price'&&!p.price?'skipNoPrice':'skipDone'));
 }
 
 /* ---------- 找一家 ---------- */
@@ -393,7 +499,7 @@ function card(r){
   return `<div class="card${sel?' sel':''}" data-o="${esc(p.oid)}" id="c-${esc(p.oid)}">
     <div class="walk"><b>${r.tm}</b><span>${esc(t('minUnit'))}</span></div>
     <div><div class="cn">${esc(p.name)}${p.zh&&p.zh!==p.name?`<small>${esc(p.zh)}</small>`:''}</div>
-      <div class="tags">${tagHTML(p)}<span>${typeName(p.type)}</span><span class="num">${distTxt(r.d)}</span>${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
+      <div class="tags">${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}<span class="num">${distTxt(r.d)}</span>${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
       ${dishHTML(p)}
       ${whyHTML(r)}
       <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span></div></div>
@@ -425,6 +531,7 @@ function renderMe(){
   segBtns($('me-spice'),[['',t('spiceUnset')],['0',t('spice0')],['1',t('spice1')],['2',t('spice2')]],PROF.spice==null?'':PROF.spice,v=>{PROF.spice=v===''?null:+v;profChanged()});
   segBtns($('me-veg'),[['0',t('vegAny')],['1',t('vegPref')]],PROF.veg?'1':'0',v=>{PROF.veg=v==='1';profChanged()});
   segBtns($('me-budget'),[['',t('budgetAny')],...[15,25,40].map(n=>[String(n),t('budgetUpTo',{n})])],PROF.budget==null?'':PROF.budget,v=>{PROF.budget=v===''?null:+v;profChanged()});
+  segBtns($('me-ask'),[['1',t('askOn')],['0',t('askOff')]],PROF.noAsk?'0':'1',v=>{PROF.noAsk=v==='0';profChanged()});
   const hs=[...HIST].sort((a,b)=>b.t-a.t).slice(0,50);
   $('me-hist-h').textContent=HIST.length?t('meHistN',{n:HIST.length}):t('meHist');
   $('me-hist').innerHTML=hs.length?hs.map(h=>{const d=new Date(h.t);return `<div class="hrow">
@@ -438,7 +545,8 @@ function histChanged(){saveHist();persona();profChanged()}
 function ate(oid,r){
   const p=P.find(x=>x.oid===oid); if(!p) return;
   const last=HIST.find(h=>h.oid===oid&&Date.now()-h.t<12*3600e3);  // 12 小时内同一家算同一顿
-  if(last) last.r=r; else HIST.push({oid,name:p.name,cu:p.cu,t:Date.now(),r});
+  if(last) last.r=r; else HIST.push({oid,name:p.name,cu:p.cu,t:Date.now(),r,ctx:CTX.key});  // ctx：当时的场合，用来学习「什么场合吃什么」
+  if(seen.oid===oid) seen.acted=true;
   histChanged(); toast(t(r===1?'toastGood':r===-1?'toastBad':'toastOk'));
 }
 function askRate(el,oid){  // 在按钮旁边问「好吃吗」
@@ -456,8 +564,10 @@ function checkPending(){
 }
 
 function renderFoot(){
-  const withH=P.filter(p=>p.oh).length, nChain=P.filter(p=>!p.oh&&p.ohChain).length, nd=Object.keys(DISH).length;
-  const v={ts:DATA.ts.slice(0,10),ov:DATA.overture||'',total:P.length.toLocaleString(),withH:withH.toLocaleString(),pct:Math.round(withH/P.length*100),chain:nChain.toLocaleString(),n:nd};
+  const withH=P.filter(p=>p.oh).length, nSite=P.filter(p=>!p.oh&&p.siteOh).length, nChain=P.filter(p=>!p.oh&&!p.siteOh&&p.ohChain).length;
+  const nd=P.filter(p=>p.dish).length, np=P.filter(p=>p.price).length, known=withH+nSite+nChain;
+  const v={ts:DATA.ts.slice(0,10),ov:DATA.overture||'',total:P.length.toLocaleString(),withH:withH.toLocaleString(),site:nSite.toLocaleString(),chain:nChain.toLocaleString(),
+    pct:Math.round(known/P.length*100),n:nd.toLocaleString(),np:np.toLocaleString()};
   $('foot').innerHTML=['foot1','foot2','foot3','foot4'].map(k=>`<p>${esc(t(k,v))}</p>`).join('');
 }
 
@@ -537,7 +647,8 @@ function update(fit){
 }
 
 /* ---------- interactions ---------- */
-function setLoc(lat,lng,name,acc,key){S.lat=+lat;S.lng=+lng;S.locName=name||'';S.locKey=key||null;S.acc=acc||null;save();limit=40;picked=null;selected=null;closePops();update(true)}
+function setLoc(lat,lng,name,acc,key){S.lat=+lat;S.lng=+lng;S.locName=name||'';S.locKey=key||null;S.acc=acc||null;save();limit=40;picked=null;selected=null;closePops();update(true);loadWeather()}
+map.on('popupopen',()=>{if(S.view==='rand')seen.engaged=true});  // 在地图上点开了抽中的店
 function select(oid,scroll){
   selected=selected===oid&&!scroll?null:oid;
   if(scroll){const idx=RES.findIndex(x=>x.p.oid===oid);if(idx>=limit){limit=idx+10}}
@@ -662,8 +773,15 @@ document.addEventListener('click',e=>{
   const rl=e.target.closest('[data-rl]'); if(rl){const r=LS.get('recentLocs',[])[+rl.dataset.rl];if(r)useAddr({main:r.n,lat:r.lat,lng:r.lng});return}
   const k=e.target.closest('[data-k]'); if(k){toggleKW(k.dataset.k);return}
   const md=e.target.closest('[data-mood]'); if(md){cycle(S.mood,md.dataset.mood);save();renderMoods();compute();roll();renderPick();draw(false);return}
-  if(e.target.id==='reroll'){roll();renderPick();draw(false);return}
-  const nav=e.target.closest('[data-nav]'); if(nav){const p=P.find(x=>x.oid===nav.dataset.nav);if(p)LS.set('pending',{oid:p.oid,name:p.name,t:Date.now()});return}
+  if(e.target.id==='reroll'){
+    // 看了超过 20 秒、或者点开看过详情，最后还是换掉了：问一句为什么
+    const prev=seen; clearTimeout(prev.timer);
+    if(prev.oid&&!prev.acted&&(Date.now()-prev.at>20e3||prev.engaged)&&!askedSkip.has(prev.oid)&&canAsk()) askSkip(prev.oid);
+    roll();renderPick();draw(false);return}
+  const sk=e.target.closest('[data-skip]'); if(sk){answerSkip(sk.dataset.skip);return}
+  if(e.target.closest('[data-linger-no]')){$('linger').hidden=true;seen.acted=true;return}
+  if(e.target.closest('.pick a:not([data-nav])')) seen.engaged=true;  // 看评价、打电话：有兴趣
+  const nav=e.target.closest('[data-nav]'); if(nav){seen.acted=true;const p=P.find(x=>x.oid===nav.dataset.nav);if(p)LS.set('pending',{oid:p.oid,name:p.name,t:Date.now()});return}
   const at=e.target.closest('[data-ate]'); if(at){askRate(at,at.dataset.ate);return}
   const rt=e.target.closest('[data-rate]'); if(rt){const [o,v]=rt.dataset.rate.split('|');ate(o,+v);const pd=LS.get('pending',null);if(pd&&pd.oid===o)LS.set('pending',null);checkPending();rt.closest('.rateask')?.replaceWith(Object.assign(document.createElement('span'),{className:'rated',textContent:t('rated')}));if(S.view==='rand'&&+v===-1){compute();roll()}renderPanel();return}
   if(e.target.closest('[data-pending-no]')){LS.set('pending',null);checkPending();return}
@@ -672,7 +790,7 @@ document.addEventListener('click',e=>{
   const hd=e.target.closest('[data-hdel]'); if(hd){HIST=HIST.filter(x=>x.t!==+hd.dataset.hdel);histChanged();return}
   if(e.target.id==='more'){limit+=40;renderList();return}
   const go=e.target.closest('[data-go]'); if(go){map.closePopup();if(S.view==='rand'){picked=go.dataset.go;renderPick();draw(false)}else select(go.dataset.go,true);return}
-  const f=e.target.closest('[data-fav]'); if(f){const o=f.dataset.fav;favs.has(o)?favs.delete(o):favs.add(o);LS.set('favs',[...favs]);f.setAttribute('aria-pressed',favs.has(o));compute();renderFav();if(S.view==='fav'||S.kw.includes('场景:我收藏的'))update();return}
+  const f=e.target.closest('[data-fav]'); if(f){const o=f.dataset.fav;if(seen.oid===o)seen.acted=true;favs.has(o)?favs.delete(o):favs.add(o);LS.set('favs',[...favs]);f.setAttribute('aria-pressed',favs.has(o));compute();renderFav();if(S.view==='fav'||S.kw.includes('场景:我收藏的'))update();return}
   const oh=e.target.closest('[data-oh]'); if(oh){const o=oh.dataset.oh;const v=document.getElementById('oh-'+o).value.trim();
     if(v&&!parseOH(v)){oh.insertAdjacentHTML('afterend',`<span class="err">${esc(t('ohBad'))}</span>`);return}
     if(v)overrides[o]=v;else delete overrides[o];LS.set('oh',overrides);update();return}
@@ -682,7 +800,7 @@ document.addEventListener('click',e=>{
 });
 try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{setTiles();draw(false)})}catch(e){}
 new MutationObserver(()=>{setTiles();draw(false)}).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
-setInterval(()=>{if(S.when==='now')update();else renderClock()},60000);
+setInterval(()=>{if(S.when==='now'){update();loadWeather()}else renderClock()},60000);
 
 $('me-export').onclick=()=>{
   const blob=new Blob([JSON.stringify({v:1,exported:new Date().toISOString(),profile:PROF,history:HIST,favs:[...favs]},null,1)],{type:'application/json'});
@@ -693,7 +811,7 @@ $('me-import').onchange=async e=>{
   const f=e.target.files[0]; if(!f) return;
   try{
     const j=JSON.parse(await f.text());
-    if(j.profile){for(const k of ['spice','veg','budget']) if(j.profile[k]!==undefined) PROF[k]=j.profile[k]; PROF.likes=[...new Set([...PROF.likes,...(j.profile.likes||[])])]}
+    if(j.profile){for(const k of ['spice','veg','budget','diet','explore','ctx','noAsk']) if(j.profile[k]!==undefined) PROF[k]=j.profile[k]; PROF.likes=[...new Set([...PROF.likes,...(j.profile.likes||[])])]}
     if(Array.isArray(j.history)){const seen=new Set(HIST.map(h=>h.oid+'|'+h.t));for(const h of j.history) if(h&&h.oid&&h.t&&!seen.has(h.oid+'|'+h.t)) HIST.push({oid:h.oid,name:h.name||'',cu:h.cu||[],t:+h.t,r:h.r??null})}
     if(Array.isArray(j.favs)){j.favs.forEach(o=>favs.add(o));LS.set('favs',[...favs])}
     histChanged(); toast(t('imported'));
@@ -702,16 +820,54 @@ $('me-import').onchange=async e=>{
 };
 /* ---------- 口味问卷：第一次打开时出现，可跳过；「我的」里可以重做 ---------- */
 const DIETS=['dietNone','dietVeg','dietVegan','dietHalal','dietNoPork','dietNoBeef','dietNoSeafood','dietGF','dietAllergy'];
-const PAIRS=[['pairSoupA','想吃点:热汤面','pairSoupB','想吃点:寿司'],['pairSpicyA','想吃点:辣的','pairSpicyB','想吃点:三明治/轻食'],['pairRiceA','想吃点:汉堡炸鸡','pairRiceB','想吃点:米饭'],
-  ['pairPaceA','想吃点:烤肉','pairPaceB','场景:快速解决'],['pairSweetA','想吃点:奶茶','pairSweetB','想吃点:咖啡']];
-const QSTEPS=['intro','diet','spice','likes','dislikes','pairs','budget','explore','habit','favs','result'];
-const CUISINE_IDS=KW[0].items.map(([n])=>'菜系:'+n);
+// 滑动卡片：16 个菜系 + 12 个「想吃点」，右滑喜欢、左滑不感兴趣、上滑/点「无所谓」跳过
+const EMOJI={'中餐':'🥟','日料':'🍱','韩餐':'🥘','越南':'🥖','泰国':'🥥','东南亚':'🍢','印度/南亚':'🍛','中东':'🥙','希腊/地中海':'🫒','意大利':'🍝','欧洲':'🥐',
+  '墨西哥/拉美':'🌮','加勒比':'🌴','非洲':'🍲','美式':'🥩','海鲜':'🦞','热汤面':'🍜','辣的':'🌶️','米饭':'🍚','烤肉':'🍖','寿司':'🍣','披萨':'🍕','汉堡炸鸡':'🍔',
+  '三明治/轻食':'🥗','早餐':'🍳','甜品':'🍰','奶茶':'🧋','咖啡':'☕'};
+const DECK=[...KW[0].items.map(([n,l])=>({id:'菜系:'+n,n,ex:Array.isArray(l)?l:[]})),...KW[1].items.map(([n,l])=>({id:'想吃点:'+n,n,ex:Array.isArray(l)?l:[]}))];
+const DECK_IDS=DECK.map(c=>c.id);
+const CTXQ=[['lunch',['quick','sit','any']],['fri',['bold','sit','any']],['rain',['soup','hotpot','any']]];  // 问卷里的场合题
+const QSTEPS=['intro','diet','spice','swipe','budget','explore','ctx','habit','favs','result'];
 let QZ=null;
 function quizOpen(){
-  QZ={i:0,diet:[...(PROF.diet||[])],spice:PROF.spice,likes:PROF.likes.filter(x=>x.startsWith('菜系:')),dislikes:PROF.likes.filter(x=>x.startsWith('!菜系:')).map(x=>x.slice(1)),
-      pairs:{},budget:PROF.budget,explore:PROF.explore,mode:S.mode,mins:S.mins,area:'',favs:[],q:'',found:[]};
-  PAIRS.forEach(([,a,,b],k)=>{if(PROF.likes.includes(a))QZ.pairs[k]='a';else if(PROF.likes.includes(b))QZ.pairs[k]='b'});
+  const sw={}; for(const id of DECK_IDS){if(PROF.likes.includes(id))sw[id]=1;else if(PROF.likes.includes('!'+id))sw[id]=-1}
+  QZ={i:0,diet:[...(PROF.diet||[])],spice:PROF.spice,sw,k:0,budget:PROF.budget,explore:PROF.explore,ctx:Object.assign({},PROF.ctx||{}),
+      mode:S.mode,mins:S.mins,area:'',favs:[],q:'',found:[]};
   const d=$('quiz'); if(!d.open) d.showModal(); quizRender();
+}
+function swipeCard(){  // 当前这张卡
+  const c=DECK[QZ.k]; if(!c) return '';
+  const ex=[...new Set(c.ex.map(cz))].slice(0,4).join(LANG==='zh'?'、':', ');
+  const prev=QZ.sw[c.id];
+  return `<div class="sw-stack"><div class="sw-card" id="sw-card" tabindex="0">
+    <div class="sw-emoji" aria-hidden="true">${EMOJI[c.n]||'🍽️'}</div>
+    <div class="sw-name">${esc(kwLabel(c.id))}</div>
+    ${ex?`<div class="sw-ex">${esc(ex)}</div>`:''}
+    ${prev!=null?`<div class="sw-prev">${esc(t(prev===1?'swPrevLike':'swPrevNo'))}</div>`:''}
+    <div class="sw-stamp like">❤️</div><div class="sw-stamp no">👎</div>
+  </div></div>
+  <div class="sw-btns"><button type="button" class="sw-btn no" data-sw="-1" aria-label="${esc(t('swNo'))}">👎<small>${esc(t('swNo'))}</small></button>
+    <button type="button" class="sw-btn meh" data-sw="0">${esc(t('swMeh'))}</button>
+    <button type="button" class="sw-btn like" data-sw="1" aria-label="${esc(t('swLike'))}">❤️<small>${esc(t('swLike'))}</small></button></div>`;
+}
+function swipe(v){  // v：1 喜欢 / -1 不感兴趣 / 0 无所谓
+  const c=DECK[QZ.k]; if(!c) return;
+  if(v) QZ.sw[c.id]=v; else delete QZ.sw[c.id];
+  const el=$('sw-card');
+  const go=()=>{QZ.k++; if(QZ.k>=DECK.length){QZ.i++;} quizRender()};
+  if(el&&!matchMedia('(prefers-reduced-motion: reduce)').matches){el.style.transition='transform .22s ease-out, opacity .22s';el.style.transform=v===1?'translateX(140%) rotate(18deg)':v===-1?'translateX(-140%) rotate(-18deg)':'translateY(-120%)';el.style.opacity='0';setTimeout(go,200)}
+  else go();
+}
+function bindSwipe(){  // 手指拖动卡片
+  const el=$('sw-card'); if(!el) return;
+  let x0=0,y0=0,dx=0,dy=0,drag=false;
+  el.addEventListener('pointerdown',e=>{drag=true;x0=e.clientX;y0=e.clientY;el.setPointerCapture(e.pointerId);el.style.transition='none'});
+  el.addEventListener('pointermove',e=>{if(!drag)return;dx=e.clientX-x0;dy=e.clientY-y0;el.style.transform=`translate(${dx}px,${Math.min(0,dy)}px) rotate(${dx/18}deg)`;el.dataset.lean=dx>40?'like':dx<-40?'no':''});
+  const end=()=>{if(!drag)return;drag=false;el.dataset.lean='';
+    if(dx>90)swipe(1);else if(dx<-90)swipe(-1);else if(dy<-90)swipe(0);else{el.style.transition='transform .2s';el.style.transform=''}
+    dx=dy=0};
+  el.addEventListener('pointerup',end); el.addEventListener('pointercancel',end);
+  el.addEventListener('keydown',e=>{if(e.key==='ArrowRight')swipe(1);else if(e.key==='ArrowLeft')swipe(-1);else if(e.key==='ArrowUp')swipe(0)});
 }
 function quizClose(){LS.set('onboarded',true);$('quiz').close()}
 const qOpt=(attr,val,on,label)=>`<button type="button" class="chip qopt" ${attr}="${esc(val)}" aria-pressed="${!!on}">${esc(label)}</button>`;
@@ -732,12 +888,11 @@ function quizRender(){
   }else if(step==='spice'){
     h=head('qzSpice')+`<div class="chips">${[[0,'spice0'],[1,'spice1'],[2,'spiceMid'],[3,'spice3']].map(([v,k])=>qOpt('data-qspice',v,QZ.spice===v,t(k))).join('')}</div>`;
     foot=nav();
-  }else if(step==='likes'||step==='dislikes'){
-    const mine=step==='likes'?QZ.likes:QZ.dislikes, other=step==='likes'?QZ.dislikes:QZ.likes;
-    h=head(step==='likes'?'qzLikes':'qzDislikes',t('qzMulti'))+`<div class="chips">${CUISINE_IDS.filter(id=>!other.includes(id)).map(id=>qOpt(step==='likes'?'data-qlike':'data-qdislike',id,mine.includes(id),kwLabel(id))).join('')}</div>`;
-    foot=nav();
-  }else if(step==='pairs'){
-    h=head('qzPairs',t('qzPairsHint'))+`<div class="qz-pairs">${PAIRS.map(([a,,b],k)=>`<div class="qz-pair">${['a','b'].map(side=>`<button type="button" class="qz-side" data-qpair="${k}|${side}" aria-pressed="${QZ.pairs[k]===side}">${esc(t(side==='a'?a:b))}</button>`).join('<span class="qz-or">or</span>')}</div>`).join('')}</div>`;
+  }else if(step==='swipe'){
+    h=head('qzSwipe',t('qzSwipeHint'))+`<div class="sw-count num">${Math.min(QZ.k+1,DECK.length)} / ${DECK.length}</div>`+swipeCard();
+    foot=`<button type="button" class="btn ghost" data-qz="back">${esc(t('qzBack'))}</button><button type="button" class="btn ghost" data-qz="next">${esc(t('swSkipRest'))}</button>`;
+  }else if(step==='ctx'){
+    h=head('qzCtx',t('qzCtxHint'))+CTXQ.map(([q,opts])=>`<div class="qz-ctx"><div class="qz-ctx-q">${esc(t('qzCtx_'+q))}</div><div class="chips">${opts.map(o=>qOpt('data-qctx',q+'|'+o,QZ.ctx[q]===o,t('ctxOpt_'+q+'_'+o))).join('')}</div></div>`).join('');
     foot=nav();
   }else if(step==='budget'){
     h=head('qzBudget')+`<div class="chips">${[[15,'budget15'],[25,'budget25'],[40,'budget40'],['','budgetFree']].map(([v,k])=>qOpt('data-qbudget',v,String(QZ.budget??'')===String(v),t(k))).join('')}</div><p class="hint small">${esc(t('budgetHint'))}</p>`;
@@ -767,6 +922,7 @@ function quizRender(){
   body.innerHTML=h; $('quiz-foot').innerHTML=foot;
   if(step==='favs'){const i=$('qz-fav-q');i.oninput=()=>{QZ.q=i.value.trim();quizSearch();const pos=i.selectionStart;quizRender();const j=$('qz-fav-q');j.focus();j.setSelectionRange(pos,pos)}}
   if(step==='habit') $('qz-area').onchange=e=>{QZ.area=e.target.value};
+  if(step==='swipe') bindSwipe();
   body.scrollTop=0;
 }
 function quizSearch(){
@@ -777,17 +933,15 @@ function quizSearch(){
   QZ.found=hits.sort((a,b)=>a.d-b.d).slice(0,6).map(x=>x.p);
 }
 function quizApply(){  // 把问卷答案写进口味档案
-  const pairIds=PAIRS.flatMap(([,a,,b])=>[a,b]);
-  const keep=PROF.likes.filter(x=>{const id=x.replace(/^!/,'');return !CUISINE_IDS.includes(id)&&!pairIds.includes(id)});
-  const likes=[...QZ.likes,...QZ.dislikes.map(x=>'!'+x)];
-  PAIRS.forEach(([,a,,b],k)=>{if(QZ.pairs[k]==='a')likes.push(a);if(QZ.pairs[k]==='b')likes.push(b)});
+  const keep=PROF.likes.filter(x=>!DECK_IDS.includes(x.replace(/^!/,'')));  // 卡片没覆盖的（比如场景标签）保留
+  const likes=Object.entries(QZ.sw).map(([id,v])=>v===1?id:'!'+id);
   if(QZ.spice===3&&!likes.includes('想吃点:辣的')) likes.push('想吃点:辣的');
   if(QZ.diet.includes('dietNoSeafood')&&!likes.includes('!菜系:海鲜')) likes.push('!菜系:海鲜');
   PROF.likes=[...new Set([...keep,...likes])];
   PROF.diet=QZ.diet.filter(d=>d!=='dietNone');
   PROF.veg=PROF.diet.includes('dietVeg')||PROF.diet.includes('dietVegan');
   if(QZ.spice!=null) PROF.spice=Math.min(2,QZ.spice);
-  PROF.budget=QZ.budget===''?null:QZ.budget; PROF.explore=QZ.explore;
+  PROF.budget=QZ.budget===''?null:QZ.budget; PROF.explore=QZ.explore; PROF.ctx=QZ.ctx;
   for(const o of QZ.favs){const p=P.find(x=>x.oid===o);if(p&&!HIST.some(h=>h.oid===o&&h.r===1))HIST.push({oid:o,name:p.name,cu:p.cu,t:Date.now()-7*DAY,r:1})}
   S.mode=QZ.mode; S.mins=QZ.mins;
   if(QZ.area!==''){const i=+QZ.area,h=HOODS[i];S.lat=h[2];S.lng=h[3];S.locName=h[0];S.locKey='hood:'+i;S.acc=null}
@@ -798,17 +952,18 @@ document.addEventListener('click',e=>{
   const b=e.target.closest('[data-qz]');
   if(b){const a=b.dataset.qz;
     if(a==='close'){quizClose();if(QSTEPS[QZ.i]==='result'&&S.view!=='rand')setView('rand');return}
-    if(a==='back'){QZ.i=Math.max(0,QZ.i-1);quizRender();return}
-    if(a==='skip'){const st=QSTEPS[QZ.i];if(st==='diet')QZ.diet=[];if(st==='pairs')QZ.pairs={};if(st==='favs')QZ.favs=[]}
+    if(a==='back'){
+      if(QSTEPS[QZ.i]==='swipe'&&QZ.k>0){QZ.k--;quizRender();return}  // 卡片里：回到上一张
+      QZ.i=Math.max(0,QZ.i-1); if(QSTEPS[QZ.i]==='swipe')QZ.k=DECK.length-1; quizRender(); return}
+    if(a==='skip'){const st=QSTEPS[QZ.i];if(st==='diet')QZ.diet=[];if(st==='ctx')QZ.ctx={};if(st==='favs')QZ.favs=[]}
     if(QSTEPS[QZ.i]==='favs') quizApply();
-    QZ.i=Math.min(QSTEPS.length-1,QZ.i+1); quizRender(); return}
-  const el=e.target.closest('[data-qdiet],[data-qspice],[data-qlike],[data-qdislike],[data-qpair],[data-qbudget],[data-qexplore],[data-qmode],[data-qmins],[data-qfav],[data-qunfav]'); if(!el) return;
+    QZ.i=Math.min(QSTEPS.length-1,QZ.i+1); if(QSTEPS[QZ.i]==='swipe'&&QZ.k>=DECK.length)QZ.k=0; quizRender(); return}
+  const sw=e.target.closest('[data-sw]'); if(sw){swipe(+sw.dataset.sw);return}
+  const el=e.target.closest('[data-qdiet],[data-qspice],[data-qctx],[data-qbudget],[data-qexplore],[data-qmode],[data-qmins],[data-qfav],[data-qunfav]'); if(!el) return;
   const d=el.dataset, tog=(arr,v)=>{const i=arr.indexOf(v);i>=0?arr.splice(i,1):arr.push(v)};
   if(d.qdiet){ if(d.qdiet==='dietNone') QZ.diet=QZ.diet.includes('dietNone')?[]:['dietNone']; else {QZ.diet=QZ.diet.filter(x=>x!=='dietNone');tog(QZ.diet,d.qdiet)} }
   else if(d.qspice!=null) QZ.spice=QZ.spice===+d.qspice?null:+d.qspice;
-  else if(d.qlike) tog(QZ.likes,d.qlike);
-  else if(d.qdislike) tog(QZ.dislikes,d.qdislike);
-  else if(d.qpair){const [k,side]=d.qpair.split('|');QZ.pairs[k]=QZ.pairs[k]===side?undefined:side}
+  else if(d.qctx){const [q,o]=d.qctx.split('|');QZ.ctx[q]=QZ.ctx[q]===o?undefined:o}
   else if(d.qbudget!=null) QZ.budget=String(QZ.budget??'')===d.qbudget?null:(d.qbudget===''?'':+d.qbudget);
   else if(d.qexplore!=null) QZ.explore=QZ.explore===+d.qexplore?null:+d.qexplore;
   else if(d.qmode) QZ.mode=d.qmode;
@@ -844,5 +999,6 @@ document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkPendi
 checkPending();
 renderControls();renderKW();renderMoods();renderFoot();renderView();
 update(true);
+loadWeather();
 if(!LS.get('onboarded',false)&&!PROF.likes.length&&!HIST.length) quizOpen();  // 第一次打开：口味问卷
 })();

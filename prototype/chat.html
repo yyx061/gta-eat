@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>聊聊吃什么（演示）</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="../style.css">
+<style>
+  body{background:var(--bg)}
+  .demo{max-width:560px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;padding:calc(16px + env(safe-area-inset-top,0px)) 16px 0}
+  .demo-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:12px;border-bottom:1px solid var(--line)}
+  .demo-bar h1{margin:0;font-family:var(--display);font-size:22px;font-weight:800;letter-spacing:-.01em}
+  .badge{font-size:12px;color:var(--warn);background:var(--warn-soft);border-radius:999px;padding:2px 10px}
+  .log{flex:1;display:flex;flex-direction:column;gap:10px;padding:16px 0 12px}
+  .msg{max-width:86%;padding:10px 14px;border-radius:16px;line-height:1.6;font-size:15px}
+  .bot{background:var(--surface);border:1px solid var(--line);border-bottom-left-radius:4px;align-self:flex-start}
+  .me{background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:4px;align-self:flex-end}
+  .me.typed{background:var(--ink);color:var(--surface)}
+  .quick{display:flex;flex-wrap:wrap;gap:6px;align-self:flex-start;max-width:100%}
+  .quick .chip{font-size:14px;padding:7px 14px}
+  .care{background:var(--warn-soft);border-color:var(--warn);color:var(--ink)}
+  .recs{display:grid;gap:10px;align-self:stretch}
+  .rec{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px 16px;display:grid;gap:6px}
+  .rec .top{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+  .rec .nm{font-weight:700;font-size:16px}
+  .rec .nm small{font-weight:400;color:var(--muted);margin-left:6px;font-size:13px}
+  .rec .why{font-size:14px;color:var(--ink);background:var(--sunk);border-radius:8px;padding:6px 10px}
+  .rec .go{display:flex;gap:12px;font-size:13px}
+  .typing{align-self:flex-start;color:var(--faint);font-size:13px}
+  .composer{position:sticky;bottom:0;background:var(--bg);padding:10px 0 calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--line);display:grid;gap:6px}
+  .composer form{display:flex;gap:8px}
+  .composer .in{flex:1;font-size:16px;padding:10px 12px;background:var(--surface)}
+  .composer .meta{font-size:12px;color:var(--faint)}
+</style>
+</head>
+<body>
+<div class="demo">
+  <div class="demo-bar"><h1>💬 聊聊吃什么</h1><span class="badge">效果演示 · 未上线</span></div>
+  <div class="log" id="log" aria-live="polite"></div>
+  <div class="composer">
+    <form id="f"><input class="in" id="t" placeholder="想多说几句？比如「加班到很晚，胃有点不舒服」" autocomplete="off"><button class="btn primary">发送</button></form>
+    <div class="meta">上面的按钮不花钱、不发送任何信息；打字的内容才会交给 AI 理解（演示版的 AI 回复是写好的示例）。</div>
+  </div>
+</div>
+
+<script src="../data/food-data.js"></script>
+<script src="../data/dish-data.js"></script>
+<script>
+(function(){
+const D=window.FOOD_DATA, DISH=window.DISH_DATA||{};
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let st={}; try{st=JSON.parse(localStorage.getItem('eat:state')||'{}')}catch(e){}
+const ME={lat:st.lat||43.6529,lng:st.lng||-79.3980,name:st.locName||'唐人街 Spadina'};
+const rad=Math.PI/180, dist=(a,b,c,d)=>{const x=(d-b)*rad*Math.cos((a+c)/2*rad),y=(c-a)*rad;return Math.sqrt(x*x+y*y)*6371000};
+const P=D.rows.map(r=>({name:r[0],zh:r[1],lat:r[2],lng:r[3],type:r[4],cu:r[5].map(k=>D.cuisines[k]),oid:r[12],dish:DISH[r[12]]}))
+  .map(p=>({...p,d:dist(ME.lat,ME.lng,p.lat,p.lng)})).filter(p=>p.d<1300);
+const walk=d=>Math.max(1,Math.round(d*1.25/80));
+
+// 心情 / 身体 → 想吃的类别、要避开的类别、推荐理由
+const G={
+  soothe:{want:['congee','soup','pho','noodle','noodles','vietnamese','udon','dim_sum','cantonese','taiwanese'],why:'热乎、清淡、好消化'},
+  comfort:{want:['ramen','noodle','noodles','hotpot','hot_pot','korean','pho','udon','japanese','chinese'],why:'一碗热的，吃完整个人会舒服一点'},
+  treat:{want:['dessert','ice_cream','bubble_tea','bakery','cake','gelato','crepe','waffle','donut'],why:'来点甜的，心情会好一点'},
+  quick:{want:['sandwich','burger','chicken','pizza','shawarma','banh_mi','sub','poke'],why:'近、出餐快，不用等'},
+  vent:{want:['sichuan','szechuan','hunan','thai','korean','korean_bbq','barbecue','bbq','chicken','wings','hotpot'],why:'够味、够爽，吃完解气'},
+  explore:{want:['ethiopian','peruvian','malaysian','filipino','afghan','persian','tibetan','uyghur','turkish','korean','vietnamese','thai','mexican','greek','italian'],why:'心情好，适合试点平时不常吃的'},
+  light:{want:['coffee_shop','cafe','bakery','bubble_tea','juice','smoothie','salad','sandwich','dessert'],why:'量不大，垫一下刚好'},
+  hearty:{want:['barbecue','bbq','korean_bbq','burger','steak_house','buffet','chinese','indian','caribbean','shawarma'],why:'分量足，能吃饱'}
+};
+const SPICY=['sichuan','szechuan','hunan','thai','indian','korean_bbq','jamaican','mexican','hotpot','hot_pot','wings','pakistani','caribbean'];
+const GREASY=['burger','chicken','fried_chicken','wings','fries','pizza','barbecue','bbq','korean_bbq','donut'];
+const COLD=['sushi','poke','salad','ice_cream','bubble_tea','juice','smoothie','gelato','frozen_yogurt','sandwich'];
+const HOT=['congee','soup','pho','noodle','noodles','ramen','hotpot','hot_pot','udon','korean','chinese','vietnamese'];
+
+const log=document.getElementById('log');
+const say=(html,cls='bot')=>{const d=document.createElement('div');d.className='msg '+cls;d.innerHTML=html;log.appendChild(d);d.scrollIntoView({behavior:'smooth',block:'end'});return d};
+const ask=(q,opts,cb)=>{say(q);const w=document.createElement('div');w.className='quick';w.innerHTML=opts.map((o,i)=>`<button type="button" class="chip${o.care?' care':''}" data-i="${i}">${esc(o.l)}</button>`).join('');
+  w.onclick=e=>{const b=e.target.closest('button');if(!b)return;const o=opts[+b.dataset.i];w.remove();say(esc(o.l),'me');setTimeout(()=>cb(o),350)};log.appendChild(w);w.scrollIntoView({behavior:'smooth',block:'end'})};
+
+let S={};
+function start(){
+  S={goal:null,avoid:[],temp:null,hunger:null,feel:null};
+  say(`嗨，我帮你想想吃什么。出发点是 <b>${esc(ME.name)}</b>，先看步行 15 分钟以内的店。`);
+  ask('今天感觉怎么样？',[
+    {l:'😊 心情不错',k:'good'},{l:'😮‍💨 有点累',k:'tired'},{l:'😔 心情有点低落',k:'down'},{l:'😤 有点烦',k:'annoyed'},{l:'🤒 身体不太舒服',k:'sick'}
+  ],o=>{S.feel=o.k;
+    if(o.k==='sick') return askSick();
+    S.goal={good:'explore',tired:'comfort',down:'comfort',annoyed:'vent'}[o.k];
+    if(o.k==='down') say('辛苦了。吃点热乎的或者甜的，都会让人好受一点。');
+    if(o.k==='tired') say('累的时候就别折腾了，找近一点、吃着舒服的。');
+    askHunger();
+  });
+}
+function askSick(){
+  ask('哪里不舒服？',[
+    {l:'胃不舒服',k:'stomach'},{l:'感冒 / 喉咙痛',k:'cold'},{l:'没什么胃口',k:'noappetite'},{l:'挺难受的，比较严重',k:'serious',care:true}
+  ],o=>{
+    if(o.k==='serious'){
+      say('听起来挺难受的，先照顾好身体最重要。如果发高烧、剧烈疼痛、呼吸困难，请直接去急诊或打 <b>911</b>；不确定要不要看医生，可以打安省健康热线 <b>811</b>（24 小时，有护士接听，可以要中文服务）。');
+      return ask('如果只是想先吃点东西垫一垫，我可以找清淡好消化的：',[{l:'好，找点清淡的',k:'ok'},{l:'先不吃了',k:'no'}],x=>{
+        if(x.k==='no') return say('好的，多喝水、好好休息。需要的时候再来找我 🙏');
+        S.goal='soothe';S.avoid=[...SPICY,...GREASY];S.temp='hot';S.hunger='light';recommend();
+      });
+    }
+    S.goal='soothe';S.avoid=[...SPICY,...GREASY];
+    if(o.k==='cold') say('喉咙痛就少吃辣和油炸的，热汤热粥最合适。');
+    if(o.k==='stomach') say('胃不舒服的话，避开辛辣、油腻和生冷的。');
+    if(o.k==='noappetite'){say('没胃口的话，吃一点点清淡的就好，别勉强。');S.hunger='light'}
+    S.temp='hot'; if(S.hunger) return recommend(); askHunger(true);
+  });
+}
+function askHunger(skipTemp){
+  ask('饿到什么程度？',[{l:'只想吃一点',k:'light'},{l:'正常饿',k:'normal'},{l:'饿坏了',k:'starving'},{l:'赶时间，快一点',k:'rush'}],o=>{
+    S.hunger=o.k;
+    if(o.k==='light'&&S.goal!=='soothe') S.goal=S.feel==='down'?'treat':'light';
+    if(o.k==='starving'&&S.goal!=='soothe') S.goal='hearty';
+    if(o.k==='rush') S.goal=S.goal==='soothe'?'soothe':'quick';
+    if(skipTemp) return recommend();
+    ask('想吃热的还是凉的？',[{l:'热乎的',k:'hot'},{l:'凉的',k:'cold'},{l:'都行',k:'any'}],x=>{S.temp=x.k;recommend()});
+  });
+}
+let shown=new Set();
+function pick(){
+  const g=G[S.goal];
+  const score=p=>{let s=0;
+    if(p.cu.some(c=>g.want.includes(c))) s+=3;
+    if(S.temp==='hot'&&p.cu.some(c=>HOT.includes(c))) s+=1;
+    if(S.temp==='cold'&&p.cu.some(c=>COLD.includes(c))) s+=1;
+    if(p.dish) s+=0.5;
+    if(S.hunger==='rush') s+=Math.max(0,1-p.d/800);
+    return s};
+  let c=P.filter(p=>!shown.has(p.oid)&&!p.cu.some(x=>S.avoid.includes(x))&&(S.temp!=='cold'||!p.cu.some(x=>['congee','soup','hotpot','hot_pot'].includes(x))))
+    .map(p=>({p,s:score(p)+Math.random()*0.6})).filter(x=>x.s>=3).sort((a,b)=>b.s-a.s||a.p.d-b.p.d);
+  const out=[],seen=new Set();
+  for(const x of c){const k=x.p.cu[0]||x.p.name;if(seen.has(k))continue;seen.add(k);out.push(x.p);if(out.length===3)break}
+  out.forEach(p=>shown.add(p.oid));
+  return out;
+}
+function recommend(){
+  const typing=say('正在从附近的店里挑…','typing');
+  setTimeout(()=>{typing.remove();
+    const list=pick();
+    if(!list.length){say('附近没找到特别合适的了。要不换个条件？');return again()}
+    const g=G[S.goal];
+    say(`挑了 ${list.length} 家，都是步行能到的：`);
+    const w=document.createElement('div');w.className='recs';
+    w.innerHTML=list.map(p=>`<div class="rec">
+      <div class="top"><span class="nm">${esc(p.name)}${p.zh&&p.zh!==p.name?`<small>${esc(p.zh)}</small>`:''}</span><span class="num">步行 ${walk(p.d)} 分钟</span></div>
+      <div class="tags">${[...new Set(p.cu)].slice(0,3).map(c=>`<span class="t">${esc(c.replace(/_/g,' '))}</span>`).join('')}</div>
+      ${p.dish?`<div class="dishes"><span class="lab">招牌</span>${p.dish.d.map(([a])=>`<span class="d">${esc(a)}</span>`).join('')}</div>`:''}
+      <div class="why">💡 ${esc(g.why)}${S.avoid.length?'，也避开了辛辣油腻':''}</div>
+      <div class="go"><a href="https://www.google.com/maps/dir/?api=1&origin=${ME.lat},${ME.lng}&destination=${p.lat},${p.lng}&travelmode=walking" target="_blank" rel="noopener">就它了，导航 ↗</a></div>
+    </div>`).join('');
+    log.appendChild(w);w.scrollIntoView({behavior:'smooth',block:'end'});
+    again();
+  },700);
+}
+function again(){ask('还满意吗？',[{l:'换一批',k:'more'},{l:'重新聊',k:'restart'}],o=>{if(o.k==='more')recommend();else{log.innerHTML='';shown.clear();start()}})}
+
+// 演示版：打字的内容用写好的回复，展示 AI 接入后的样子
+document.getElementById('f').onsubmit=e=>{
+  e.preventDefault();const t=document.getElementById('t');const v=t.value.trim();if(!v)return;t.value='';
+  log.querySelectorAll('.quick').forEach(q=>q.remove());
+  say(esc(v),'me typed');
+  const typing=say('AI 正在理解…（演示）','typing');
+  setTimeout(()=>{typing.remove();
+    const sick=/胃|疼|痛|不舒服|感冒|发烧|难受|拉肚子|恶心/.test(v), tired=/累|加班|困|晚/.test(v), flavor=/味|辣|重口|馋/.test(v);
+    let r='（演示回复）';
+    if(sick&&flavor){r+='明白，加班到这么晚还胃不舒服，但又想吃点有味道的。那就找<b>有味道但不刺激</b>的：比如越南粉、潮汕粥、日式乌冬，汤底鲜但不辣不油。';S.goal='soothe';S.avoid=[...SPICY,...GREASY];S.temp='hot'}
+    else if(sick){r+='身体不舒服就吃清淡好消化的，我帮你避开辛辣和油炸。';S.goal='soothe';S.avoid=[...SPICY,...GREASY];S.temp='hot'}
+    else if(tired){r+='辛苦了！累的时候找近一点、一碗热的最治愈。';S.goal='comfort';S.avoid=[];S.temp='hot'}
+    else {r+='好的，我按你说的挑几家看看。';S.goal=S.goal||'explore';S.avoid=S.avoid||[]}
+    say(r+'<br><small style="color:var(--muted)">正式版会由 AI 真正理解你说的话，这里只是按关键词模拟。</small>');
+    S.hunger=S.hunger||'normal'; recommend();
+  },900);
+};
+start();
+})();
+</script>
+</body>
+</html>
