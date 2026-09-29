@@ -291,7 +291,7 @@ dialog.quiz[open]{display:flex}
 /* ---------- 场合、看了没选 ---------- */
 .ctx-line{font-size:12px;color:var(--muted)}
 .linger{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--accent-soft);border-radius:var(--r);padding:8px 10px;font-size:14px}
-.skip-ask{display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--sunk);border-radius:var(--r-lg);padding:10px 12px;font-size:14px}
+.skip-ask{scroll-margin:80px;display:flex;flex-wrap:wrap;align-items:center;gap:8px;background:var(--sunk);border-radius:var(--r-lg);padding:10px 12px;font-size:14px}
 .skip-ask .linkbtn{margin-left:auto;text-decoration:none;color:var(--faint)}
 
 /* ---------- 窄屏 ---------- */

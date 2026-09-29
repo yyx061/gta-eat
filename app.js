@@ -241,6 +241,7 @@ function persona(){  // 每次档案或记录变了重新整理一次，compute 
   // C：每种场合（工作日/周末 × 时段）下常吃、没给过 👎 的菜系
   const habit={};
   for(const h of HIST){ if(!h.ctx||h.r===-1) continue; const m=habit[h.ctx]||(habit[h.ctx]={}); for(const c of h.cu||[]) m[c]=(m[c]||0)+1 }
+  for(const h of LS.get('ctxPick',[])){ const m=habit[h.ctx]||(habit[h.ctx]={}); for(const c of h.cu||[]) m[c]=(m[c]||0)+1 }  // 「为什么选它：正想吃这类」
   const tmpNo=LS.get('tmpNo',[]).filter(x=>x.until>now);  // 「没选这家：不想吃这类」，同一场合下 1 天内生效
   PER={rated,recentStore,recentCu,like:tests(true),dislike:tests(false),habit,tmpNo};
 }
@@ -322,6 +323,8 @@ function taste(p,d=0){  // {s:分数, why:[{t:原因, good:true/false}]}
   // 「没选这家」的回答
   if(PER.tmpNo.some(x=>x.key===CTX.key&&x.cu.some(c=>p.cu.includes(c)))){s-=2;why.push({t:t('whyTmpNo'),good:false})}
   if(PROF.nearBias) s-=PROF.nearBias*d/Math.max(maxDist(),1);
+  if(PROF.dishBias&&p.dish&&p.dish.s==='site') s+=PROF.dishBias*0.5;          // 「为什么选它：招牌菜吸引我」
+  if(PROF.priceRef&&p.price&&p.price.min>PROF.priceRef*1.5) s-=0.5;            // 「为什么选它：价格合适」
   if(PROF.softBudget&&p.price&&p.price.min>=PROF.softBudget&&!(PROF.budget&&p.price.min>PROF.budget)){s-=1;why.push({t:t('whyPricey'),good:false})}
   return {s,why};
 }
@@ -434,6 +437,7 @@ function renderPick(){
     <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span></div>
     <div class="pick-acts">
       <button class="btn primary" type="button" id="reroll">${esc(t('reroll'))}</button>
+      <button class="btn ghost" type="button" data-nope="${esc(p.oid)}">${esc(t('nopeBtn'))}</button>
       <a class="btn" href="${gdir(p)}" target="_blank" rel="noopener" data-nav="${esc(p.oid)}">${esc(t('goNav'))}</a>
       <button class="btn ghost" type="button" data-ate="${esc(p.oid)}">${esc(t('ateThis'))}</button>
       <a class="btn ghost" href="${gmaps(p)}" target="_blank" rel="noopener">${esc(t('seeReviews'))}</a>${r.st.k==='unk'&&p.phone?`<a class="btn ghost" href="tel:${esc(p.phone.replace(/[^+\d]/g,''))}">${esc(t('callHours'))}</a>`:''}
@@ -444,11 +448,17 @@ function renderPick(){
   </article>`;
 }
 
-/* ---------- 看了但没选：问一句为什么（不打扰：同一家只问一次、两次至少隔 3 分钟、可以在「我的」里关掉）---------- */
-let seen={oid:null,at:0,engaged:false,acted:false,timer:null};
+/* ---------- 看了但没选 / 选了：问一句为什么 ----------
+   自动追问：看了 8 秒以上又换掉才问；同一家只问一次；两次至少隔 1 分钟；「我的」里可以关掉。
+   「不要这家…」和「为什么选它」是用户自己点的或刚做完决定，不受间隔限制（关掉追问后也不问「为什么选」）。 */
+const ASK_VIEW=8e3, ASK_GAP=60e3;
+let seen={oid:null,at:0,engaged:false,acted:false,timer:null};   // 随便吃：当前这张卡
+let fseen={oid:null,at:0,acted:false};                           // 找一家：当前展开的那家
 const askedSkip=new Set();
 function trackPick(oid){ clearTimeout(seen.timer); seen={oid,at:Date.now(),engaged:false,acted:false,timer:setTimeout(askLinger,40e3)} }
-const canAsk=()=>!PROF.noAsk&&Date.now()-LS.get('askT',0)>180e3;
+const canAsk=()=>!PROF.noAsk&&Date.now()-LS.get('askT',0)>ASK_GAP;
+const markActed=oid=>{if(seen.oid===oid)seen.acted=true;if(fseen.oid===oid)fseen.acted=true};
+const askBox=()=>$(S.view==='find'?'skip-ask-find':S.view==='fav'?'skip-ask-fav':'skip-ask');
 function askLinger(){  // 停留 40 秒还没动：要去吗？
   const box=$('linger');
   if(!box||document.hidden||seen.acted||S.view!=='rand'||seen.oid!==picked||!canAsk()) return;
@@ -456,21 +466,44 @@ function askLinger(){  // 停留 40 秒还没动：要去吗？
   box.hidden=false;
   box.innerHTML=`<span>${esc(t('lingerQ'))}</span><a class="btn primary" href="${gdir(P.find(p=>p.oid===seen.oid))}" target="_blank" rel="noopener" data-nav="${esc(seen.oid)}">${esc(t('goNav'))}</a><button type="button" class="btn ghost" data-linger-no>${esc(t('lingerNo'))}</button>`;
 }
-function askSkip(oid){  // 换一家时：刚才那家为什么没选？
+function askSkip(oid,manual){  // 没选这家：为什么？manual=用户自己点了「不要这家…」
   const p=P.find(x=>x.oid===oid); if(!p) return;
-  askedSkip.add(oid); LS.set('askT',Date.now());
-  const box=$('skip-ask'); box.hidden=false; box.dataset.oid=oid;
-  box.innerHTML=`<span>${t('skipQ',{name:esc(p.name)})}</span><span class="chips small">${['far','cu','price','hours','look'].map(k=>`<button type="button" class="chip" data-skip="${k}">${esc(t('skip_'+k))}</button>`).join('')}</span><button type="button" class="linkbtn" data-skip="x" aria-label="${esc(t('close'))}">✕</button>`;
+  askedSkip.add(oid); if(!manual) LS.set('askT',Date.now());
+  const box=askBox(); box.hidden=false; box.dataset.oid=oid; box.dataset.manual=manual?'1':'';
+  box.innerHTML=`<span>${t(manual?'nopeQ':'skipQ',{name:esc(p.name)})}</span><span class="chips small">${['far','cu','price','hours','look'].filter(k=>!(manual&&k==='look')).map(k=>`<button type="button" class="chip" data-skip="${k}">${esc(t('skip_'+k))}</button>`).join('')}</span><button type="button" class="linkbtn" data-skip="x" aria-label="${esc(t('close'))}">✕</button>`;
+  box.scrollIntoView({behavior:'smooth',block:'nearest'});
 }
-function answerSkip(k){
-  const box=$('skip-ask'), p=P.find(x=>x.oid===box.dataset.oid); box.hidden=true;
-  if(!p||k==='x') return;
+function answerSkip(k,box){
+  const p=P.find(x=>x.oid===box.dataset.oid), manual=box.dataset.manual==='1'; box.hidden=true;
+  if(!p) return;
+  if(k==='x'){ if(manual&&S.view==='rand'){roll();renderPick();draw(false)} return }
   if(k==='far') PROF.nearBias=Math.min(2,(PROF.nearBias||0)+0.7);
   else if(k==='cu'){const l=LS.get('tmpNo',[]).filter(x=>x.until>Date.now());l.push({cu:p.cu,key:CTX.key,until:Date.now()+DAY});LS.set('tmpNo',l)}
   else if(k==='price'&&p.price) PROF.softBudget=Math.min(PROF.softBudget||999,p.price.min);
   else if(k==='hours'&&S.show!=='eat'){S.show='eat';save();renderControls()}
-  if(k!=='look'){profChanged();compute();if(!POOL.some(r=>r.p.oid===picked))roll();renderPick();draw(false)}
+  if(k!=='look'){profChanged();compute()}
+  if(S.view==='rand'){ if(manual||!POOL.some(r=>r.p.oid===picked)) roll(); renderPick(); draw(false) }  // 「不要这家」：直接换下一家
+  else if(manual&&selected===p.oid){ selected=null; fseen={oid:null,at:0,acted:false}; renderPanel(); draw(false) }
+  else if(k!=='look') renderPanel();
   toast(t(k==='look'?'toastOk':k==='hours'?'skipHoursDone':k==='price'&&!p.price?'skipNoPrice':'skipDone'));
+}
+// 选了这家（导航或记了吃过）：为什么选它？同一家 12 小时内只问一次
+function askWhyPick(oid){
+  const p=P.find(x=>x.oid===oid); if(!p||PROF.noAsk) return;
+  const asked=LS.get('askedWhy',{}); if(Date.now()-(asked[oid]||0)<12*3600e3) return;
+  asked[oid]=Date.now(); LS.set('askedWhy',asked);
+  const box=askBox(); box.hidden=false; box.dataset.oid=oid;
+  box.innerHTML=`<span>${t('whyQ',{name:esc(p.name)})}</span><span class="chips small">${['near','cu','dish','price','random'].map(k=>`<button type="button" class="chip" data-whypick="${k}">${esc(t('why_'+k))}</button>`).join('')}</span><button type="button" class="linkbtn" data-whypick="x" aria-label="${esc(t('close'))}">✕</button>`;
+}
+function answerWhyPick(k,box){
+  const p=P.find(x=>x.oid===box.dataset.oid); box.hidden=true;
+  if(!p||k==='x') return;
+  if(k==='near') PROF.nearBias=Math.min(2,(PROF.nearBias||0)+0.3);
+  else if(k==='cu'){const l=LS.get('ctxPick',[]);l.push({cu:p.cu,ctx:CTX.key,t:Date.now()});LS.set('ctxPick',l.slice(-200))}  // 记进这个场合的习惯
+  else if(k==='dish') PROF.dishBias=Math.min(2,(PROF.dishBias||0)+0.5);
+  else if(k==='price'&&p.price) PROF.priceRef=p.price.max;
+  if(k!=='random'){profChanged();compute();renderPanel()}
+  toast(t('toastOk'));
 }
 
 /* ---------- 找一家 ---------- */
@@ -506,7 +539,7 @@ function card(r){
     <div class="acts"><button class="star" type="button" data-fav="${esc(p.oid)}" aria-pressed="${favs.has(p.oid)}" title="${esc(t('fav'))}">★</button></div>
     <div class="more">
       <div>${esc([p.addr,p.city].filter(Boolean).join(', ')||t('noAddr'))}</div>
-      <div class="links"><a href="${gmaps(p)}" target="_blank" rel="noopener">${esc(t('gmapsReviews'))}</a><a href="${gdir(p)}" target="_blank" rel="noopener" data-nav="${esc(p.oid)}">${esc(t('navTo',{mode:modeL()}))}</a>${/^https?:/.test(p.web)?`<a href="${esc(p.web)}" target="_blank" rel="noopener">${esc(t('website'))}</a>`:''}${telHTML(p)}<button class="linkbtn" type="button" data-ate="${esc(p.oid)}">${esc(t('ateBefore'))}</button></div>
+      <div class="links"><a href="${gmaps(p)}" target="_blank" rel="noopener">${esc(t('gmapsReviews'))}</a><a href="${gdir(p)}" target="_blank" rel="noopener" data-nav="${esc(p.oid)}">${esc(t('navTo',{mode:modeL()}))}</a>${/^https?:/.test(p.web)?`<a href="${esc(p.web)}" target="_blank" rel="noopener">${esc(t('website'))}</a>`:''}${telHTML(p)}<button class="linkbtn" type="button" data-ate="${esc(p.oid)}">${esc(t('ateBefore'))}</button><button class="linkbtn" type="button" data-nope="${esc(p.oid)}">${esc(t('nopeBtn'))}</button></div>
       <div>${srcHTML(p)}</div>
       <div class="ohedit"><input class="in" id="oh-${esc(p.oid)}" value="${esc(ohSrc)}" placeholder="${esc(t('ohPh'))}"><button class="btn" type="button" data-oh="${esc(p.oid)}">${esc(t('ohSave'))}</button>${overrides[p.oid]?`<button class="btn" type="button" data-ohx="${esc(p.oid)}">${esc(t('ohReset'))}</button>`:''}</div>
     </div>
@@ -546,7 +579,7 @@ function ate(oid,r){
   const p=P.find(x=>x.oid===oid); if(!p) return;
   const last=HIST.find(h=>h.oid===oid&&Date.now()-h.t<12*3600e3);  // 12 小时内同一家算同一顿
   if(last) last.r=r; else HIST.push({oid,name:p.name,cu:p.cu,t:Date.now(),r,ctx:CTX.key});  // ctx：当时的场合，用来学习「什么场合吃什么」
-  if(seen.oid===oid) seen.acted=true;
+  markActed(oid);
   histChanged(); toast(t(r===1?'toastGood':r===-1?'toastBad':'toastOk'));
 }
 function askRate(el,oid){  // 在按钮旁边问「好吃吗」
@@ -650,7 +683,11 @@ function update(fit){
 function setLoc(lat,lng,name,acc,key){S.lat=+lat;S.lng=+lng;S.locName=name||'';S.locKey=key||null;S.acc=acc||null;save();limit=40;picked=null;selected=null;closePops();update(true);loadWeather()}
 map.on('popupopen',()=>{if(S.view==='rand')seen.engaged=true});  // 在地图上点开了抽中的店
 function select(oid,scroll){
+  const prev=fseen;
   selected=selected===oid&&!scroll?null:oid;
+  // 找一家：展开看了 8 秒以上、什么都没做就换去看别的（或者收起来），问一句
+  if(prev.oid&&prev.oid!==selected&&!prev.acted&&Date.now()-prev.at>ASK_VIEW&&!askedSkip.has(prev.oid)&&canAsk()) askSkip(prev.oid);
+  fseen=selected?{oid:selected,at:Date.now(),acted:false}:{oid:null,at:0,acted:false};
   if(scroll){const idx=RES.findIndex(x=>x.p.oid===oid);if(idx>=limit){limit=idx+10}}
   renderPanel();draw(false);
   if(scroll){const el=document.getElementById('c-'+oid);if(el)el.scrollIntoView({behavior:'smooth',block:'nearest'})}
@@ -774,23 +811,25 @@ document.addEventListener('click',e=>{
   const k=e.target.closest('[data-k]'); if(k){toggleKW(k.dataset.k);return}
   const md=e.target.closest('[data-mood]'); if(md){cycle(S.mood,md.dataset.mood);save();renderMoods();compute();roll();renderPick();draw(false);return}
   if(e.target.id==='reroll'){
-    // 看了超过 20 秒、或者点开看过详情，最后还是换掉了：问一句为什么
+    // 看了 8 秒以上、或者点开看过详情，最后还是换掉了：问一句为什么
     const prev=seen; clearTimeout(prev.timer);
-    if(prev.oid&&!prev.acted&&(Date.now()-prev.at>20e3||prev.engaged)&&!askedSkip.has(prev.oid)&&canAsk()) askSkip(prev.oid);
+    if(prev.oid&&!prev.acted&&(Date.now()-prev.at>ASK_VIEW||prev.engaged)&&!askedSkip.has(prev.oid)&&canAsk()) askSkip(prev.oid);
     roll();renderPick();draw(false);return}
-  const sk=e.target.closest('[data-skip]'); if(sk){answerSkip(sk.dataset.skip);return}
+  const nope=e.target.closest('[data-nope]'); if(nope){const o=nope.dataset.nope;markActed(o);askSkip(o,true);return}
+  const sk=e.target.closest('[data-skip]'); if(sk){answerSkip(sk.dataset.skip,sk.closest('.skip-ask'));return}
+  const wp=e.target.closest('[data-whypick]'); if(wp){answerWhyPick(wp.dataset.whypick,wp.closest('.skip-ask'));return}
   if(e.target.closest('[data-linger-no]')){$('linger').hidden=true;seen.acted=true;return}
   if(e.target.closest('.pick a:not([data-nav])')) seen.engaged=true;  // 看评价、打电话：有兴趣
-  const nav=e.target.closest('[data-nav]'); if(nav){seen.acted=true;const p=P.find(x=>x.oid===nav.dataset.nav);if(p)LS.set('pending',{oid:p.oid,name:p.name,t:Date.now()});return}
+  const nav=e.target.closest('[data-nav]'); if(nav){const o=nav.dataset.nav;markActed(o);const p=P.find(x=>x.oid===o);if(p){LS.set('pending',{oid:p.oid,name:p.name,t:Date.now()});setTimeout(()=>askWhyPick(o),300)}return}
   const at=e.target.closest('[data-ate]'); if(at){askRate(at,at.dataset.ate);return}
-  const rt=e.target.closest('[data-rate]'); if(rt){const [o,v]=rt.dataset.rate.split('|');ate(o,+v);const pd=LS.get('pending',null);if(pd&&pd.oid===o)LS.set('pending',null);checkPending();rt.closest('.rateask')?.replaceWith(Object.assign(document.createElement('span'),{className:'rated',textContent:t('rated')}));if(S.view==='rand'&&+v===-1){compute();roll()}renderPanel();return}
+  const rt=e.target.closest('[data-rate]'); if(rt){const [o,v]=rt.dataset.rate.split('|');ate(o,+v);const pd=LS.get('pending',null);if(pd&&pd.oid===o)LS.set('pending',null);checkPending();rt.closest('.rateask')?.replaceWith(Object.assign(document.createElement('span'),{className:'rated',textContent:t('rated')}));if(S.view==='rand'&&+v===-1){compute();roll()}renderPanel();if(+v!==-1)askWhyPick(o);return}
   if(e.target.closest('[data-pending-no]')){LS.set('pending',null);checkPending();return}
   const lk=e.target.closest('[data-like]'); if(lk){cycle(PROF.likes,lk.dataset.like);profChanged();return}
   const hr=e.target.closest('[data-hrate]'); if(hr){const [t,v]=hr.dataset.hrate.split('|');const h=HIST.find(x=>x.t===+t);if(h){h.r=h.r===+v?null:+v;histChanged()}return}
   const hd=e.target.closest('[data-hdel]'); if(hd){HIST=HIST.filter(x=>x.t!==+hd.dataset.hdel);histChanged();return}
   if(e.target.id==='more'){limit+=40;renderList();return}
   const go=e.target.closest('[data-go]'); if(go){map.closePopup();if(S.view==='rand'){picked=go.dataset.go;renderPick();draw(false)}else select(go.dataset.go,true);return}
-  const f=e.target.closest('[data-fav]'); if(f){const o=f.dataset.fav;if(seen.oid===o)seen.acted=true;favs.has(o)?favs.delete(o):favs.add(o);LS.set('favs',[...favs]);f.setAttribute('aria-pressed',favs.has(o));compute();renderFav();if(S.view==='fav'||S.kw.includes('场景:我收藏的'))update();return}
+  const f=e.target.closest('[data-fav]'); if(f){const o=f.dataset.fav;markActed(o);favs.has(o)?favs.delete(o):favs.add(o);LS.set('favs',[...favs]);f.setAttribute('aria-pressed',favs.has(o));compute();renderFav();if(S.view==='fav'||S.kw.includes('场景:我收藏的'))update();return}
   const oh=e.target.closest('[data-oh]'); if(oh){const o=oh.dataset.oh;const v=document.getElementById('oh-'+o).value.trim();
     if(v&&!parseOH(v)){oh.insertAdjacentHTML('afterend',`<span class="err">${esc(t('ohBad'))}</span>`);return}
     if(v)overrides[o]=v;else delete overrides[o];LS.set('oh',overrides);update();return}
