@@ -1,0 +1,29 @@
+# 每晚「夜宵提醒」推送。GitHub 的 cron 用 UTC：多伦多 21 点 = 夏令时 01:00 UTC / 冬令时 02:00 UTC，两个都跑，脚本里判断当地时间。
+# GitHub 的定时任务可能晚 5–30 分钟。要改时间/日子：改下面的 PUSH_HOUR / PUSH_DAYS（0=周日…6=周六）和 cron。
+name: night-push
+on:
+  schedule:
+    - cron: '0 1,2 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '不管几点，马上发一条（测试用）'
+        type: boolean
+        default: false
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { sparse-checkout: scripts }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --omit=dev --ignore-scripts
+        working-directory: scripts
+      - run: node scripts/push/send.mjs ${{ inputs.force && '--force' || '' }}
+        env:
+          PUSH_SUBSCRIPTION: ${{ secrets.PUSH_SUBSCRIPTION }}
+          VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          PUSH_HOUR: '21'
+          PUSH_DAYS: '0,1,2,3,4,5,6'

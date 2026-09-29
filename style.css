@@ -235,6 +235,7 @@ dialog h2{margin:0 0 10px;font-family:var(--display);font-size:20px}
 .me-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;display:grid;gap:10px}
 .me-card h2{margin:0;font-family:var(--display);font-size:18px}
 .hint.small{font-size:12px;margin-top:4px}
+.push-sub{width:100%;font-family:var(--mono);font-size:11px;resize:vertical}
 .hlist{display:grid}
 .hrow{display:grid;grid-template-columns:44px minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);font-size:14px}
 .hrow:first-child{border-top:0}

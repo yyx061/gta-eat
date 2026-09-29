@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "unpdf": "^1.8.1"
+    "unpdf": "^1.8.1",
+    "web-push": "^3.6.7"
   }
 }

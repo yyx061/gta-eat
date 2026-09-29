@@ -666,6 +666,7 @@ function renderFav(){
 const PROF_GROUPS=[['菜系',KW[0].items.map(([n])=>'菜系:'+n)],['想吃点',KW[1].items.map(([n])=>'想吃点:'+n)]];
 const RATE=[[1,'rate1'],[0,'rate0'],[-1,'rateN1']];  // 显示时用 t()
 function renderMe(){
+  renderPush();
   $('me-likes').innerHTML=PROF_GROUPS.map(([g,ids])=>`<div class="kg"><span class="lab">${esc(gText(g))}</span><div class="chips">${ids.map(id=>{const st=chipSt(PROF.likes,id);return `<button type="button" class="chip" data-like="${esc(id)}" aria-pressed="${st==='yes'}" data-st="${st}">${st==='yes'?'❤️ ':''}${esc(kwLabel(id))}</button>`}).join('')}</div></div>`).join('');
   segBtns($('me-spice'),[['',t('spiceUnset')],['0',t('spice0')],['1',t('spice1')],['2',t('spice2')]],PROF.spice==null?'':PROF.spice,v=>{PROF.spice=v===''?null:+v;profChanged()});
   segBtns($('me-veg'),[['0',t('vegAny')],['1',t('vegPref')]],PROF.veg?'1':'0',v=>{PROF.veg=v==='1';profChanged()});
@@ -1137,6 +1138,35 @@ document.addEventListener('click',e=>{
 });
 $('quiz').addEventListener('cancel',()=>LS.set('onboarded',true));  // Esc 关掉也算跳过
 $('qz-redo').onclick=()=>quizOpen();
+
+/* ---------- 夜宵提醒：真推送（GitHub Actions 每晚发，见 .github/workflows/night-push.yml）----------
+   这里只负责在手机上订阅，然后把「接收地址」（订阅信息）显示出来，交给 GitHub 的加密设置。 */
+const VAPID_PUBLIC='BN-zyczdlZ4969rEG8yghKKuR1Q_VsKAHm_k24yRn9AqC0gt3jHaIauvXzRq5HKlzQphHWqXHwwwLh0i-sYvtno';
+const pushOK=()=>'serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
+function b64u(s){const p='='.repeat((4-s.length%4)%4), b=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(b,c=>c.charCodeAt(0))}
+async function renderPush(){
+  const box=$('push-box'); if(!box) return;
+  if(!pushOK()||location.protocol!=='https:'){box.innerHTML=`<p class="hint">${esc(t('pushUnsupported'))}</p>`;return}
+  const reg=await navigator.serviceWorker.ready, sub=await reg.pushManager.getSubscription();
+  if(!sub){box.innerHTML=`<button type="button" class="btn primary" id="push-on">${esc(t('pushOn'))}</button>`;return}
+  box.innerHTML=`<p class="hint">${esc(t('pushIsOn'))}</p>
+    <details><summary>${esc(t('pushShowSub'))}</summary><p class="hint small">${esc(t('pushSubHint'))}</p>
+      <textarea class="in push-sub" readonly rows="4">${esc(JSON.stringify(sub))}</textarea>
+      <div class="row"><button type="button" class="btn" id="push-copy">${esc(t('pushCopy'))}</button></div></details>
+    <div class="row"><button type="button" class="btn ghost" id="push-off">${esc(t('pushOff'))}</button></div>`;
+}
+document.addEventListener('click',async e=>{
+  if(e.target.id==='push-on'){
+    try{
+      const perm=await Notification.requestPermission(); if(perm!=='granted'){toast(t('pushDenied'));return}
+      const reg=await navigator.serviceWorker.ready;
+      await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(VAPID_PUBLIC)});
+      toast(t('pushSubscribed')); renderPush();
+    }catch(err){toast(t('pushFail'))}
+  }
+  if(e.target.id==='push-copy'){const ta=document.querySelector('.push-sub');ta.select();try{await navigator.clipboard.writeText(ta.value);toast(t('pushCopied'))}catch{document.execCommand('copy');toast(t('pushCopied'))}}
+  if(e.target.id==='push-off'){const reg=await navigator.serviceWorker.ready,sub=await reg.pushManager.getSubscription();if(sub)await sub.unsubscribe();toast(t('pushOffDone'));renderPush()}
+});
 $('g-save').onclick=()=>{const v=$('g-key').value.trim();if(!v)return;LS.set('gkey',v);$('g-key').value='';gErr='';toast(t('gSaved'));update();renderMe()};
 $('g-clear').onclick=()=>{LS.set('gkey','');toast(t('gCleared'));update();renderMe()};
 
