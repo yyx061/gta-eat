@@ -541,26 +541,52 @@ async function gFetch(p){
   const key=gKey(); if(!key||!p||gPending.has(p.oid)) return;
   const c=GP[p.oid];
   if(c&&(Date.now()-c.t<DAY||(c.none&&Date.now()-c.t<7*DAY))) return;  // 一天内查过就用缓存；没找到的一周内不再找
-  const u=gUsage(); if(u.n>=GDAILY) return;
+  if(gUsage().n>=GDAILY) return;
   gPending.add(p.oid); refreshG(p.oid);
   try{
     const H={'X-Goog-Api-Key':key};
-    let id=c&&c.id;
-    if(!id){
+    const search=async(q,near)=>{  // 找对应的 Google 地点：只要 id（这一步免费），拿前 3 个候选；near=只在附近约 200 米内找
+      const dLa=0.0018, dLo=0.0025;
+      const where=near?{locationRestriction:{rectangle:{low:{latitude:p.lat-dLa,longitude:p.lng-dLo},high:{latitude:p.lat+dLa,longitude:p.lng+dLo}}}}
+                      :{locationBias:{circle:{center:{latitude:p.lat,longitude:p.lng},radius:300}}};
       const r=await fetch('https://places.googleapis.com/v1/places:searchText',{method:'POST',headers:{...H,'Content-Type':'application/json','X-Goog-FieldMask':'places.id'},
-        body:JSON.stringify({textQuery:[p.name,p.addr,p.city].filter(Boolean).join(' '),locationBias:{circle:{center:{latitude:p.lat,longitude:p.lng},radius:300}},pageSize:1})});
+        body:JSON.stringify({textQuery:q,...where,pageSize:3})});
       const j=await r.json(); if(!r.ok) throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
-      id=j.places&&j.places[0]&&j.places[0].id;
-      if(!id){GP[p.oid]={t:Date.now(),none:1};saveGP();return}
+      return (j.places||[]).map(x=>x.id);
+    };
+    let ids=c&&c.id?[c.id]:await search([p.name,p.addr,p.city].filter(Boolean).join(' '));
+    if(!ids.length){GP[p.oid]={t:Date.now(),none:1};saveGP();return}
+    // 同一个地址 Google 常有一条「已永久关闭」的旧条目（改过名、搬过家）：第一个候选是关门的，就看下一个近的候选，
+    // 只有附近没有开着的候选，才认定这家关门了。最多查 2 个，省额度。
+    let best=null;
+    for(const id of ids.slice(0,2)){
+      if(gUsage().n>=GDAILY) break;
+      const uu=gUsage(); uu.n++; LS.set('gcount',uu);
+      const r=await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}?languageCode=${LANG==='zh'?'zh-CN':'en'}`,
+        {headers:{...H,'X-Goog-FieldMask':'id,location,rating,userRatingCount,currentOpeningHours,regularOpeningHours,businessStatus,googleMapsUri'}});
+      const d=await r.json(); if(!r.ok) throw new Error((d.error&&d.error.message)||('HTTP '+r.status));
+      const off=d.location?dist(p.lat,p.lng,d.location.latitude,d.location.longitude):0;
+      if(off>(best?150:400)) continue;  // 位置对不上：多半找错了店
+      const e={id,t:Date.now(),r:d.rating??null,n:d.userRatingCount||0,url:d.googleMapsUri||'',st:d.businessStatus||'',
+        iv:gToIv((d.currentOpeningHours||d.regularOpeningHours||{}).periods)};
+      if(!best||(best.st==='CLOSED_PERMANENTLY'&&e.st!=='CLOSED_PERMANENTLY')) best=e;
+      if(best.st!=='CLOSED_PERMANENTLY') break;
     }
-    u.n++; LS.set('gcount',u);
-    const r=await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}?languageCode=${LANG==='zh'?'zh-CN':'en'}`,
-      {headers:{...H,'X-Goog-FieldMask':'id,location,rating,userRatingCount,currentOpeningHours,regularOpeningHours,businessStatus,googleMapsUri'}});
-    const d=await r.json(); if(!r.ok) throw new Error((d.error&&d.error.message)||('HTTP '+r.status));
-    // 核对位置：差 400 米以上多半是找错了店，不用它的评分
-    if(d.location&&dist(p.lat,p.lng,d.location.latitude,d.location.longitude)>400){GP[p.oid]={t:Date.now(),none:1};saveGP();return}
-    GP[p.oid]={id,t:Date.now(),r:d.rating??null,n:d.userRatingCount||0,url:d.googleMapsUri||'',st:d.businessStatus||'',
-      iv:gToIv((d.currentOpeningHours||d.regularOpeningHours||{}).periods)};
+    // 带地址搜只找到一条、而且是关门的旧条目：只用店名再搜一次（免费），看附近有没有开着的那条
+    if(best&&best.st==='CLOSED_PERMANENTLY'&&ids.length<2&&gUsage().n<GDAILY){
+      const more=(await search(p.name,true)).filter(x=>x!==best.id).slice(0,1);  // 只在附近找，最多再查 1 次
+      for(const id of more){
+        const uu=gUsage(); uu.n++; LS.set('gcount',uu);
+        const r=await fetch(`https://places.googleapis.com/v1/places/${encodeURIComponent(id)}?languageCode=${LANG==='zh'?'zh-CN':'en'}`,
+          {headers:{...H,'X-Goog-FieldMask':'id,location,rating,userRatingCount,currentOpeningHours,regularOpeningHours,businessStatus,googleMapsUri'}});
+        const d=await r.json(); if(!r.ok) break;
+        if(d.location&&dist(p.lat,p.lng,d.location.latitude,d.location.longitude)>150) break;  // 不在同一个地方，不是这家
+        if(d.businessStatus!=='CLOSED_PERMANENTLY') best={id,t:Date.now(),r:d.rating??null,n:d.userRatingCount||0,url:d.googleMapsUri||'',st:d.businessStatus||'',
+          iv:gToIv((d.currentOpeningHours||d.regularOpeningHours||{}).periods)};
+        break;
+      }
+    }
+    GP[p.oid]=best||{t:Date.now(),none:1};
     saveGP(); gErr='';
   }catch(e){ gErr=String(e.message||e).slice(0,160) }
   finally{ gPending.delete(p.oid); schedCache.clear(); update(); if(S.view==='me') renderMe() }
