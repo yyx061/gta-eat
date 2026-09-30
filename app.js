@@ -113,7 +113,9 @@ const FAST_RE=/^(mcdonald|popeyes|wendy|kfc|burgerking|aw$|awrestaurant|awcanada
   }
   for(const list of Object.values(g)) if(list.length>=5&&list.filter(p=>p.type===1).length>=list.length/2) for(const p of list) if(p.type!==2) p.fastChain=true;
 })();
-for(const p of P){ p.brand=brandOf(p.name); if(FAST_RE.test(p.brand)) p.fastChain=true }
+// 店名里任何位置出现这些品牌也算（比如「York U - Popeye's Louisiana Kitchen」）
+const FAST_ANY=/(mcdonald|popeye|wendys|burgerking|harveys|tacobell|pizzapizza|pizzanova|dominos|pizzahut|littlecaesar|dairyqueen|marybrown|chickfila|arbys|fatburger)/;
+for(const p of P){ p.brand=brandOf(p.name); if(FAST_RE.test(p.brand)||FAST_ANY.test(normName(p.name))||/\bkfc\b/i.test(p.name)) p.fastChain=true }  // KFC 只认完整单词，免得「PKF Consulting」被误判
 const isGuess=p=>!gIv(p)&&!overrides[p.oid]&&!p.oh&&!p.siteOh&&!!p.ohChain;
 const fromSite=p=>!gIv(p)&&!overrides[p.oid]&&!p.oh&&!!p.siteOh;
 function openAt(iv,w){for(const [a,b] of iv){if(a<=w&&w<b)return b-w;if(a<=w+10080&&w+10080<b)return b-w-10080}return -1}
@@ -365,7 +367,7 @@ function compute(){
     if(Math.abs(p.lat-S.lat)>dLat||Math.abs(p.lng-S.lng)>dLng) continue;
     const r=row(p,w0); if(r.d>maxD||!visible(r.st)) continue;
     NEAR.push(r);
-    if(matches(p,S.kw,q)) RES.push(r);
+    if(matches(p,S.kw,q)&&!(PROF.noFast&&p.fastChain&&!(q&&p.name.toLowerCase().includes(q)))) RES.push(r);  // 不推荐快餐：只有直接搜店名时才显示
   }
   const open=r=>['ok','tight','soon'].includes(r.st.k)?0:r.st.k==='unk'?1:2;
   RES.sort(S.sort==='near'?((a,b)=>a.d-b.d):S.sort==='fit'?((a,b)=>open(a)-open(b)||b.fit.s-a.fit.s||a.d-b.d):((a,b)=>RANK[a.st.k]-RANK[b.st.k]||a.d-b.d));
