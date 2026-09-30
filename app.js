@@ -423,7 +423,7 @@ function renderControls(){
 
 /* ---------- 随便吃：先问两个「当下」的问题，再给 N 张推荐卡（稳的 / 换换口味 / 来点惊喜 / 另一个选择）----------
    长期口味来自口味问卷、Uber 导入和「吃过了」；这里的问题只管这一顿。算法见 SPEC.md 第 5 节。 */
-const RQ=[['hunger',['snack','meal','treat']],['taste',['light','bold','soup','new','any']],['avoid',null]];  // avoid：今天不想吃的菜系（多选，可以不选）
+const RQ=[['hunger',['snack','meal','treat']],['taste',['light','bold','soup','new','any']],['avoid',null]];  // 第 3 题：今天想吃（want）/ 不想吃（avoid）的菜系，三态点选，可以不选
 const REC_NS=[3,5,7,10,15,20];
 let SA=LS.get('sessionQ',null); if(!SA||Date.now()-SA.at>3*3600e3) SA=null;  // 3 小时内的回答还算数
 let rqStep=0, REC=null, recDirty=true, SHOWN=new Set(), lateOnly=false;
@@ -478,6 +478,7 @@ function recCandidates(){
     if(SA&&SA.hunger==='treat'&&p.type!==0) return false;          // 犒劳自己：只要正经餐厅
     if(lateOnly&&!lateNight(p)) return false;                        // 从夜宵提醒进来
     if(SA&&SA.avoid&&SA.avoid.length&&groupsOf(p).some(g=>SA.avoid.includes(g))) return false;  // 今天不想吃
+    if(SA&&SA.want&&SA.want.length&&!groupsOf(p).some(g=>SA.want.includes(g))) return false;   // 今天想吃：只从这些菜系里挑
     return true;
   });
 }
@@ -580,13 +581,13 @@ function renderRand(){
       <h2>${esc(t('rq_'+q))}</h2>
       ${opts?`<div class="rq-opts">${opts.map(o=>`<button type="button" class="rq-opt" data-rq="${q}|${o}">${esc(t('rq_'+q+'_'+o))}</button>`).join('')}</div>
       <button type="button" class="linkbtn" data-rq="skip">${esc(t('qzSkip'))}</button>`
-      :`<div class="chips">${GROUPS.map(g=>{const on=((SA&&SA.avoid)||[]).includes(g.n);return `<button type="button" class="chip" data-rq-avoid="${esc(g.n)}" aria-pressed="false" data-st="${on?'no':''}">${esc(kwText(g.n))}</button>`}).join('')}</div>
-      <button type="button" class="btn primary rq-go" data-rq="skip">${esc(t(((SA&&SA.avoid)||[]).length?'rqAvoidGo':'rqAvoidNone'))}</button>`}
+      :`<p class="hint">${t('tapHint')}</p><div class="chips">${GROUPS.map(g=>{const st=((SA&&SA.want)||[]).includes(g.n)?'yes':((SA&&SA.avoid)||[]).includes(g.n)?'no':'';return `<button type="button" class="chip" data-rq-avoid="${esc(g.n)}" aria-pressed="${st==='yes'}" data-st="${st}">${esc(kwText(g.n))}</button>`}).join('')}</div>
+      <button type="button" class="btn primary rq-go" data-rq="skip">${esc(t(((SA&&SA.avoid)||[]).length||((SA&&SA.want)||[]).length?'rqAvoidGo':'rqAvoidNone'))}</button>`}
     </div>`;
     return;
   }
   if(recDirty||!REC) newRecs(); else refreshRecs();
-  const ans=SA&&SA.at?[SA.hunger&&t('rq_hunger_'+SA.hunger),SA.taste&&t('rq_taste_'+SA.taste),SA.avoid&&SA.avoid.length&&t('rqAvoidSum',{x:SA.avoid.map(kwText).join(LANG==='zh'?'、':', ')})].filter(Boolean).join(' · '):'';
+  const ans=SA&&SA.at?[SA.hunger&&t('rq_hunger_'+SA.hunger),SA.taste&&t('rq_taste_'+SA.taste),SA.want&&SA.want.length&&t('rqWantSum',{x:SA.want.map(kwText).join(LANG==='zh'?'、':', ')}),SA.avoid&&SA.avoid.length&&t('rqAvoidSum',{x:SA.avoid.map(kwText).join(LANG==='zh'?'、':', ')})].filter(Boolean).join(' · '):'';
   box.innerHTML=`<div class="rec-head">
       <div class="ctx-line">${esc(ctxLine())}${ans?` · ${esc(ans)}`:''}${lateOnly?` · 🌙`:''}</div>
       <div class="row"><span class="hint">${esc(t('recShow'))}</span><div class="seg" id="rec-n"></div></div>
@@ -1024,7 +1025,8 @@ document.addEventListener('click',e=>{
   const sg=e.target.closest('[data-sug]'); if(sg){useAddr(sugs[+sg.dataset.sug]);return}
   const rl=e.target.closest('[data-rl]'); if(rl){const r=LS.get('recentLocs',[])[+rl.dataset.rl];if(r)useAddr({main:r.n,lat:r.lat,lng:r.lng});return}
   const k=e.target.closest('[data-k]'); if(k){toggleKW(k.dataset.k);return}
-  const ra=e.target.closest('[data-rq-avoid]'); if(ra){if(!SA||SA.at)SA={};const l=SA.avoid||(SA.avoid=[]),g=ra.dataset.rqAvoid,i=l.indexOf(g);i>=0?l.splice(i,1):l.push(g);renderRand();return}
+  const ra=e.target.closest('[data-rq-avoid]'); if(ra){if(!SA||SA.at)SA={};const w=SA.want||(SA.want=[]),a=SA.avoid||(SA.avoid=[]),g=ra.dataset.rqAvoid,wi=w.indexOf(g),ai=a.indexOf(g);
+    if(wi>=0){w.splice(wi,1);a.push(g)}else if(ai>=0)a.splice(ai,1);else w.push(g);renderRand();return}  // 没选 → 想吃 → 不想吃 → 没选
   const rq=e.target.closest('[data-rq]'); if(rq){answerRQ(rq.dataset.rq);return}
   const rc=e.target.closest('[data-rec]'); if(rc){
     if(rc.dataset.rec==='more'){passShown();persona();compute();recDirty=true;renderRand();window.scrollTo({top:0,behavior:'smooth'})}

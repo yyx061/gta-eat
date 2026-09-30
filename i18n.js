@@ -105,7 +105,7 @@ zh: {
   // 随便吃：当下的问题和推荐卡
   rq_hunger: '现在有多饿、想怎么吃？', rq_hunger_snack: '🥯 随便垫垫', rq_hunger_meal: '🍽️ 正经吃一顿', rq_hunger_treat: '✨ 想好好犒劳自己',
   rq_taste: '今天口味往哪边走？', rq_taste_light: '🥗 清淡', rq_taste_bold: '🌶️ 重口', rq_taste_soup: '🍜 热乎带汤', rq_taste_new: '🧭 想吃点新的', rq_taste_any: '🎲 你来决定',
-  rq_avoid: '今天有什么不想吃的？', rqAvoidNone: '没有，推荐吧', rqAvoidGo: '好了，推荐吧', rqAvoidSum: '不想吃{x}',
+  rq_avoid: '今天特别想吃或不想吃什么？', rqAvoidNone: '没有，推荐吧', rqAvoidGo: '好了，推荐吧', rqAvoidSum: '不想吃{x}', rqWantSum: '想吃{x}',
   rqDirect: '直接推荐 →', role_safe: '稳的', role_change: '换换口味', role_surprise: '来点惊喜', roleOther: '另一个选择',
   whyChange: '换换口味，试试{to}', whyChangeN: '你这周吃了 {n} 次{from}，换个{to}？', whySurprise: '你还没试过{x}',
   ans_light: '清淡，适合今天', ans_bold: '想吃重口的就它', ans_soup: '有热汤', ans_treat: '犒劳自己',
@@ -210,7 +210,7 @@ en: {
   pushCopy: 'Copy', pushCopied: 'Copied', pushOff: 'Turn off reminder', pushOffDone: 'Reminder turned off', pushDenied: 'Notifications are blocked — turn them on in iPhone Settings → Notifications', pushSubscribed: 'Turned on', pushFail: "Couldn't turn it on — try again later",
   rq_hunger: 'How hungry — what kind of meal?', rq_hunger_snack: '🥯 Just a bite', rq_hunger_meal: '🍽️ A proper meal', rq_hunger_treat: '✨ Treat myself',
   rq_taste: 'Which way are you leaning today?', rq_taste_light: '🥗 Light', rq_taste_bold: '🌶️ Bold', rq_taste_soup: '🍜 Something hot with broth', rq_taste_new: '🧭 Something new', rq_taste_any: '🎲 You decide',
-  rq_avoid: 'Anything you don\'t want today?', rqAvoidNone: 'Nothing, go', rqAvoidGo: 'Done, go', rqAvoidSum: 'no {x}',
+  rq_avoid: 'Anything you really want — or don\'t want — today?', rqAvoidNone: 'Nothing, go', rqAvoidGo: 'Done, go', rqAvoidSum: 'no {x}', rqWantSum: 'want {x}',
   rqDirect: 'Just show me →', role_safe: 'Safe bet', role_change: 'Mix it up', role_surprise: 'Surprise', roleOther: 'Another option',
   whyChange: 'Mix it up — try {to}', whyChangeN: "You've had {from} {n} times this week — try {to}?", whySurprise: "You haven't tried {x} yet",
   ans_light: 'Light, fits today', ans_bold: 'Bold, like you wanted', ans_soup: 'Hot broth', ans_treat: 'A treat',
