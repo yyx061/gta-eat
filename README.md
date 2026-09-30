@@ -1,6 +1,6 @@
 # GTA 今天吃什么
 
-大多伦多附近吃饭灵感：按步行 / 骑车 / 打车时间划范围，随机抽一家或按关键词找，看到店时还开不开门。
+不知道吃什么时：回答两三个问题，马上给几家现在就能去吃的店（稳的 / 换换口味 / 来点惊喜），并写出理由。需求见 `SPEC.md`。
 
 ## 打开方式
 - 最简单：直接双击 `index.html` 用浏览器打开。
@@ -9,7 +9,7 @@
 ## 文件说明
 | 文件 | 内容 |
 |---|---|
-| `index.html` | 页面结构（位置栏、关键词区、列表、地图） |
+| `index.html` | 页面结构（一句话条件、随便吃、找一家、收藏、我的） |
 | `style.css` | 所有样式；颜色都在最上面的 `:root` 变量里，深色模式在下面两段 |
 | `app.js` | 页面逻辑 |
 | `data/food-data.js` | 约 2.8 万家店（脚本合并生成，不要手改） |
@@ -53,7 +53,6 @@ node scripts/dishes.mjs 纬度 经度 半径km 数量   # 例：node scripts/dis
 node scripts/build-site-data.mjs
 ```
 有官网的店读官网菜单（含 PDF，JS 网站用本机 Chrome 渲染），没有的再问 DeepSeek 或按店名推断，网页上会标明来源。
-地图底图来自 Esri（免 key），需要联网。
 
 ## 手机上用（PWA）
 网址：https://yyx061.github.io/gta-eat/ （GitHub Pages，仓库 yyx061/gta-eat）
