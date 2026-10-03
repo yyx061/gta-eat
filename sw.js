@@ -1,6 +1,6 @@
 // 离线缓存：自己的文件先走网络（保证更新），断网时用缓存；CDN 和字体先用缓存。
 // 改了要强制所有手机刷新时，把 VERSION 加一。
-const VERSION = 'v20';
+const VERSION = 'v21';
 const SHELL = ['./', 'index.html', 'style.css', 'i18n.js', 'app.js', 'data/food-data.js', 'data/site-data.js', 'manifest.webmanifest', 'icons/icon-180.png', 'icons/icon-192.png'];
 
 self.addEventListener('install', e => {

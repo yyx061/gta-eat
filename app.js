@@ -634,7 +634,7 @@ function nopeRec(i){  // 「不想吃这个」：2 周内不再出现，当场�
 }
 
 /* ---------- 问问这几家：找饭 AI 用 A2A 去问每家店的 AI（服务器在 agent/，设计见 docs/specs/2026-10-02-agent-to-agent-design.md）---------- */
-const AGENT_URL=LS.get('agentUrl','')||'';  // 服务器上线后填 Deno Deploy 的地址；空着就不显示「问问这几家」
+const AGENT_URL=LS.get('agentUrl','')||'https://gta-eat.yyx061.deno.net';  // Deno Deploy 上的问店服务器；空着就不显示「问问这几家」
 const PARTY=[[1,'1'],[2,'2'],[4,'3–4'],[6,'5+']];
 let ASK=null;  // {st:'run'|'done'|'err', stores:[{oid,name}], log:{oid:{text,ok}}, final, err}
 function askBody(){
