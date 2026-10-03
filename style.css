@@ -348,3 +348,8 @@ dialog.quiz[open]{display:flex}
 .ag-line{display:flex;flex-wrap:wrap;gap:6px}
 .ag-line span{font-size:12.5px;padding:3px 8px;border-radius:999px;background:var(--accent-soft);color:var(--ink)}
 .ag-vs{font-size:13px;color:var(--muted)}
+.askpick{appearance:none;border:1px solid var(--line);background:var(--sunk);border-radius:var(--r);min-width:40px;min-height:40px;font-size:17px;cursor:pointer;filter:grayscale(1);opacity:.6}
+.askpick[aria-pressed="true"]{filter:none;opacity:1;background:var(--accent-soft);border-color:var(--accent)}
+.acts{gap:6px}
+#find-ask .ask-box{margin:0 0 12px}
+.ask-tip{margin:0 0 10px}

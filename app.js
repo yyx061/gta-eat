@@ -539,7 +539,7 @@ function newRecs(){
   for(const c of cand){ if(out.length>=n) break; if(!taken.has(c.r.p.oid)) take(c,'other') }
   // 前三个位置按固定顺序排：稳的、换换口味、来点惊喜
   const order={safe:0,change:1,surprise:2,other:3}; out.sort((a,b)=>order[a.role]-order[b.role]);
-  REC=out; recDirty=false; ASK=null; out.forEach(x=>SHOWN.add(x.r.p.oid));
+  REC=out; recDirty=false; ASK.rand=null; out.forEach(x=>SHOWN.add(x.r.p.oid));
 }
 function refreshRecs(){  // 数据刷新（每分钟、改了口味）时：店不变，只更新状态和理由
   if(!REC) return;
@@ -556,7 +556,7 @@ function recCard(x,i){
     <div class="pn">${esc(p.name)}${p.zh&&p.zh!==p.name?`<small>${esc(p.zh)}</small>`:''}</div>
     <div class="tags">${gHTML(p)}${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}<span class="num">${distTxt(r.d)}</span></div>
     ${reason?`<div class="reason">${x.ag&&x.ag.reason?'🤖':'💡'} ${esc(reason)}</div>`:''}
-    ${agHTML(x,i)}
+    ${agHTML(x.ag,i===0&&!!x.ag&&x.ag.rank===0,ASK.rand)}
     ${dishHTML(p)}
     <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span>${r.st.k==='unk'?`<span class="hint small">${esc(t('unkWarn'))}</span>`:''}</div>
     <div class="rec-acts">
@@ -577,6 +577,7 @@ function recCard(x,i){
 }
 function renderRand(){
   const box=$('rand-body');
+  if(document.activeElement&&document.activeElement.id==='ask-need-rand') return;  // 正在写要求：不重画
   if((!SA||!SA.at)&&rqStep<RQ.length){  // 当下的问题：一屏一题，可以跳过或直接推荐
     const [q,opts]=RQ[rqStep];
     box.innerHTML=`<div class="rq">
@@ -596,11 +597,10 @@ function renderRand(){
       <div class="row"><span class="hint">${esc(t('recShow'))}</span><div class="seg" id="rec-n"></div></div>
     </div>
     ${REC.length?`<div class="rec-list">${REC.map(recCard).join('')}</div>`:`<div class="empty-pick">${esc(t(NEAR.length?'emptyMood':'emptyNear'))}</div>`}
-    ${askHTML()}
+    ${askHTML('rand')}
     <div class="rec-foot"><button type="button" class="btn primary" data-rec="more">${esc(t('recMore'))}</button><button type="button" class="btn ghost" data-rec="redo">${esc(t('recRedo'))}</button></div>`;
   segBtns($('rec-n'),REC_NS.map(v=>[v,String(v)]),S.recN||3,v=>{S.recN=+v;save();SHOWN=new Set();recDirty=true;renderRand()});
-  if($('ask-party')) segBtns($('ask-party'),PARTY,S.party||2,v=>{S.party=+v;save();renderRand()});
-  if($('ask-need')) $('ask-need').oninput=e=>{S.need=e.target.value;save()};
+  askBind('rand');
   REC.forEach(x=>gFetch(x.r.p));  // 看到的店：查 Google 评分和营业时间（有缓存、每天有上限）
 }
 function answerRQ(v){  // SA.at 有值 = 这一轮问题答完了；答到一半时 SA 里只有已答的题
@@ -636,9 +636,17 @@ function nopeRec(i){  // 「不想吃这个」：2 周内不再出现，当场�
 /* ---------- 问问这几家：找饭 AI 用 A2A 去问每家店的 AI（服务器在 agent/，设计见 docs/specs/2026-10-02-agent-to-agent-design.md）---------- */
 const AGENT_URL=LS.get('agentUrl','')||'https://gta-eat.yyx061.deno.net';  // Deno Deploy 上的问店服务器；空着就不显示「问问这几家」
 const PARTY=[[1,'1'],[2,'2'],[4,'3–4'],[6,'5+']];
-let ASK=null;  // {st:'run'|'done'|'err', stores:[{oid,name}], log:{oid:{text,ok}}, final, err}
-function askBody(){
-  const zh=LANG==='zh', w=startW(), list=(REC||[]).slice(0,5);
+// 两处可以问：rand = 随便吃（问前 5 张推荐卡），find = 找一家（问自己勾的店，最多 5 家）
+// 每处一个状态：{st:'run'|'done'|'err', q, stores:[{oid,name}], log:{oid:{text,ok,ans}}, final, ag:{oid:{reason,ans,rank}}, err}
+const ASK={rand:null,find:null};
+let FPICK=[];  // 找一家：勾选要问的店
+const rowOf=oid=>RES.find(r=>r.p.oid===oid)||NEAR.find(r=>r.p.oid===oid);
+function askItems(scope){
+  if(scope==='rand') return (REC||[]).slice(0,5);
+  return FPICK.map(rowOf).filter(Boolean).map(r=>({r,why:'',extra:[]}));
+}
+function askBody(items){
+  const zh=LANG==='zh', w=startW();
   const cons=[];
   if(PROF.spice===0) cons.push(zh?'不吃辣':'no spicy food');
   if(PROF.veg) cons.push(zh?'素食':'vegetarian');
@@ -651,16 +659,18 @@ function askBody(){
     weather:CTX.temp!=null?`${CTX.snow?(zh?'下雪 ':'snow '):CTX.wet?(zh?'下雨 ':'rain '):''}${CTX.temp}°C`:undefined,
     constraints:cons,
     persona:{likes:PROF.likes.filter(x=>x[0]!=='!').map(lab),dislikes:PROF.likes.filter(x=>x[0]==='!').map(lab),recent},
-    candidates:list.map(x=>{const r=x.r,p=r.p,g=GP[p.oid];
+    candidates:items.map(x=>{const r=x.r,p=r.p,g=GP[p.oid];
       return {oid:p.oid,minutes:r.tm,mode:modeL(),status:r.st.t,open:r.st.left!=null?hhmm(w+r.tm+r.st.left):undefined,
         google:g&&!g.none?{rating:g.r,count:g.n,status:g.st}:undefined,
         notes:[...new Set([x.why,...x.extra,...r.fit.why.filter(v=>v.good).map(v=>v.t)].filter(Boolean))].slice(0,4)}})};
 }
-async function askAgents(){
-  if(!REC||!REC.length||(ASK&&ASK.st==='run')) return;
-  const body=askBody();
-  ASK={st:'run',q:body,stores:body.candidates.map(c=>({oid:c.oid,name:(P.find(p=>p.oid===c.oid)||{}).name||c.oid})),log:{},final:null};
-  renderRand();
+const reAsk=scope=>scope==='rand'?renderRand():renderList();
+async function askAgents(scope){
+  const items=askItems(scope);
+  if(!items.length||(ASK[scope]&&ASK[scope].st==='run')) return;
+  const body=askBody(items);
+  const A=ASK[scope]={st:'run',q:body,stores:items.map(x=>({oid:x.r.p.oid,name:x.r.p.name})),log:{},final:null,ag:{}};
+  reAsk(scope);
   try{
     const res=await fetch(AGENT_URL+'/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     if(res.status===429) throw new Error('limit');
@@ -669,45 +679,58 @@ async function askAgents(){
     for(;;){
       const {done,value}=await rd.read(); if(done) break;
       buf+=dec.decode(value,{stream:true});
-      let i; while((i=buf.indexOf('\n'))>=0){ const line=buf.slice(0,i).trim(); buf=buf.slice(i+1); if(line) onAskEvent(JSON.parse(line)) }
+      let i; while((i=buf.indexOf('\n'))>=0){ const line=buf.slice(0,i).trim(); buf=buf.slice(i+1); if(line) onAskEvent(scope,A,JSON.parse(line)) }
     }
-    if(ASK.st==='run') throw new Error('no final');
-  }catch(e){ ASK.st='err'; ASK.err=String(e.message||e)==='limit'?'limit':'net'; renderRand() }
+    if(A.st==='run') throw new Error('no final');
+  }catch(e){ A.st='err'; A.err=String(e.message||e)==='limit'?'limit':'net'; if(ASK[scope]===A) reAsk(scope) }
 }
-function onAskEvent(ev){
-  if(!ASK) return;
-  if(ev.type==='reply'){ ASK.log[ev.oid]={text:ev.text,ok:!!ev.answer,ans:ev.answer}; renderRand() }
+function onAskEvent(scope,A,ev){
+  if(ASK[scope]!==A) return;  // 已经换了一批 / 重新问了
+  if(ev.type==='reply'){ A.log[ev.oid]={text:ev.text,ok:!!ev.answer,ans:ev.answer}; reAsk(scope) }
   else if(ev.type==='final'){
-    ASK.st='done'; ASK.final=ev;
-    const pos=new Map(ev.order.map((o,i)=>[o,i]));
-    REC.forEach(x=>{const o=x.r.p.oid;if(pos.has(o))x.ag={reason:ev.reasons[o]||'',ans:(ASK.log[o]||{}).ans||null,rank:pos.get(o)}});
-    REC.sort((a,b)=>(a.ag?a.ag.rank:99)-(b.ag?b.ag.rank:99));
-    renderRand();
+    A.st='done'; A.final=ev;
+    ev.order.forEach((o,i)=>{A.ag[o]={reason:ev.reasons[o]||'',ans:(A.log[o]||{}).ans||null,rank:i}});
+    if(scope==='rand'&&REC){
+      REC.forEach(x=>{const g=A.ag[x.r.p.oid];if(g)x.ag=g});
+      REC.sort((a,b)=>(a.ag?a.ag.rank:99)-(b.ag?b.ag.rank:99));
+    }
+    reAsk(scope);
   }
   else if(ev.type==='error') throw new Error(ev.error);
 }
-function askHTML(){
-  const n=Math.min(5,(REC||[]).length);
-  if(!n||!AGENT_URL) return '';
-  if(!ASK) return `<section class="ask-box">
-      <div class="ask-row"><button type="button" class="btn primary" data-ask="go">${esc(t('askBtn',{n}))}</button><span class="hint">${esc(t('askHint'))}</span></div>
-      <div class="ask-row"><span class="hint">${esc(t('askParty'))}</span><div class="seg" id="ask-party"></div></div>
-      <input class="in ask-need" id="ask-need" maxlength="200" value="${esc(S.need||'')}" placeholder="${esc(t('askNeedPh'))}">
+function askHTML(scope){
+  if(!AGENT_URL) return '';
+  const A=ASK[scope], n=askItems(scope).length;
+  if(!A){
+    if(scope==='rand'&&!n) return '';
+    if(scope==='find'&&!n) return `<div class="ask-tip hint">${esc(t('askPickTip'))}</div>`;
+    return `<section class="ask-box">
+      <div class="ask-row"><button type="button" class="btn primary" data-ask="go|${scope}">${esc(t('askBtn',{n}))}</button>${scope==='find'
+        ?`<button type="button" class="linkbtn" data-ask="clear|find">${esc(t('askClear'))}</button>`:`<span class="hint">${esc(t('askHint'))}</span>`}</div>
+      <div class="ask-row"><span class="hint">${esc(t('askParty'))}</span><div class="seg" id="ask-party-${scope}"></div></div>
+      <input class="in ask-need" id="ask-need-${scope}" maxlength="200" value="${esc(S.need||'')}" placeholder="${esc(t('askNeedPh'))}">
     </section>`;
-  const q=ASK.q, head=t('askQ',{party:q.party>=6?'5+':q.party===4?'3–4':q.party,when:q.when})+(q.need?` · 「${q.need}」`:'');
-  const rows=ASK.stores.map(s=>{const l=ASK.log[s.oid];
+  }
+  const q=A.q, head=t('askQ',{party:q.party>=6?'5+':q.party===4?'3–4':q.party,when:q.when})+(q.need?` · 「${q.need}」`:'');
+  const rows=A.stores.map(s=>{const l=A.log[s.oid];
     return `<li class="${l?(l.ok?'ok':'bad'):'wait'}"><b>${esc(s.name)}</b><span>${esc(l?(l.ok?l.text:t('askNoReply')):t('askWait'))}</span></li>`}).join('');
-  const foot=ASK.st==='run'?`<div class="hint">${esc(t('askRun',{n:ASK.stores.length}))}</div>`
-    :ASK.st==='err'?`<div class="hint bad-t">${esc(t(ASK.err==='limit'?'askLimit':'askErr'))}</div><button type="button" class="btn ghost" data-ask="reset">${esc(t('askAgain'))}</button>`
-    :`<div class="hint">${esc(t('askDone'))}</div><button type="button" class="btn ghost" data-ask="reset">${esc(t('askAgain'))}</button>`;
+  const again=`<button type="button" class="btn ghost" data-ask="reset|${scope}">${esc(t('askAgain'))}</button>`;
+  const foot=A.st==='run'?`<div class="hint">${esc(t('askRun',{n:A.stores.length}))}</div>`
+    :A.st==='err'?`<div class="hint bad-t">${esc(t(A.err==='limit'?'askLimit':'askErr'))}</div>${again}`
+    :`<div class="hint">${esc(t('askDone'))}</div>${again}`;
   return `<section class="ask-box" aria-live="polite"><div class="ask-q">🤖 ${esc(head)}</div><ul class="ask-log">${rows}</ul><div class="ask-row">${foot}</div><div class="hint small">${esc(t('askBy'))}</div></section>`;
 }
-function agHTML(x,i){  // 推荐卡上：店家 AI 的回答
-  const a=x.ag&&x.ag.ans; if(!a) return '';
+function askBind(scope){
+  const ps=$('ask-party-'+scope), nd=$('ask-need-'+scope);
+  if(ps) segBtns(ps,PARTY,S.party||2,v=>{if(nd)nd.blur();S.party=+v;save();reAsk(scope)});
+  if(nd) nd.oninput=e=>{S.need=e.target.value;save()};
+}
+function agHTML(g,first,A){  // 卡片上：店家 AI 的回答
+  const a=g&&g.ans; if(!a) return '';
   const bits=[t('seat_'+a.canSeat)];
   if(a.waitGuess&&a.waitGuess.level!=='unknown') bits.push(t('wait_'+a.waitGuess.level)+t('waitEst'));
   if(a.mustOrder&&a.mustOrder.length) bits.push(t('mustOrder')+a.mustOrder.map(m=>m.dish).join(LANG==='zh'?'、':', '));
-  const vs=i===0&&ASK&&ASK.final&&ASK.final.vsSecond?`<div class="ag-vs">${esc(t('vsSecond')+ASK.final.vsSecond)}</div>`:'';
+  const vs=first&&A&&A.final&&A.final.vsSecond?`<div class="ag-vs">${esc(t('vsSecond')+A.final.vsSecond)}</div>`:'';
   return `<div class="ag"><div class="ag-line">${bits.map(b=>`<span>${esc(b)}</span>`).join('')}</div>${a.reservation&&a.reservation.advice?`<div class="hint small">${esc(a.reservation.advice)}</div>`:''}${vs}</div>`;
 }
 
@@ -872,10 +895,11 @@ function card(r){
     <div class="walk"><b>${r.tm}</b><span>${esc(t('minUnit'))}</span></div>
     <div><div class="cn">${esc(p.name)}${p.zh&&p.zh!==p.name?`<small>${esc(p.zh)}</small>`:''}</div>
       <div class="tags">${gHTML(p)}${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}<span class="num">${distTxt(r.d)}</span>${p.veg?`<span>${esc(t('vegFriendly'))}</span>`:''}</div>
+      ${fagHTML(p)}
       ${dishHTML(p)}
       ${whyHTML(r)}
       <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span></div></div>
-    <div class="acts"><button class="star" type="button" data-fav="${esc(p.oid)}" aria-pressed="${favs.has(p.oid)}" title="${esc(t('fav'))}">★</button></div>
+    <div class="acts">${AGENT_URL&&S.view==='find'?`<button class="askpick" type="button" data-askpick="${esc(p.oid)}" aria-pressed="${FPICK.includes(p.oid)}" title="${esc(t('askPickT'))}">🤖</button>`:''}<button class="star" type="button" data-fav="${esc(p.oid)}" aria-pressed="${favs.has(p.oid)}" title="${esc(t('fav'))}">★</button></div>
     <div class="more">
       <div>${esc([p.addr,p.city].filter(Boolean).join(', ')||t('noAddr'))}</div>
       <div class="links"><a href="${gmaps(p)}" target="_blank" rel="noopener">${esc(t('gmapsReviews'))}</a><a href="${gdir(p)}" target="_blank" rel="noopener" data-nav="${esc(p.oid)}">${esc(t('navTo',{mode:modeL()}))}</a>${/^https?:/.test(p.web)?`<a href="${esc(p.web)}" target="_blank" rel="noopener">${esc(t('website'))}</a>`:''}${telHTML(p)}<button class="linkbtn" type="button" data-ate="${esc(p.oid)}">${esc(t('ateBefore'))}</button><button class="linkbtn" type="button" data-nope="${esc(p.oid)}">${esc(t('nopeBtn'))}</button></div>
@@ -884,10 +908,17 @@ function card(r){
     </div>
   </div>`;
 }
+function fagHTML(p){  // 找一家：问过的店显示理由和回答
+  const A=ASK.find, g=A&&A.ag[p.oid]; if(!g||S.view!=='find') return '';
+  return `${g.reason?`<div class="reason">🤖 ${esc(g.reason)}</div>`:''}${agHTML(g,g.rank===0,A)}`;
+}
 function renderList(){
   $('list-h').textContent=t('found',{n:Math.min(RES.length,S.findN||10)});
   const N=S.findN||10;  // 不放长列表：只显示前 N 家（10 / 15 / 20），想看别的就改条件
-  $('cards').innerHTML=RES.length?RES.slice(0,N).map(card).join('')+(RES.length>N?`<div class="showmore hint">${esc(t('findMoreHint',{n:RES.length-N}))}</div>`:''):`<div class="empty">${esc(t('emptyList'))}${S.show!=='all'?'<br>'+esc(t('emptyListClosed')):''}</div>`;
+  if(!$('find-ask').contains(document.activeElement)){ $('find-ask').innerHTML=askHTML('find'); askBind('find') }  // 正在打字时不重画，免得输入框失焦
+  const A=ASK.find, asked=A&&A.final?A.final.order.map(rowOf).filter(Boolean):[];  // 问过的店排最前面
+  const list=asked.length?[...asked,...RES.filter(r=>!A.ag[r.p.oid])]:RES;
+  $('cards').innerHTML=list.length?list.slice(0,Math.max(N,asked.length)).map(card).join('')+(list.length>N?`<div class="showmore hint">${esc(t('findMoreHint',{n:list.length-N}))}</div>`:''):`<div class="empty">${esc(t('emptyList'))}${S.show!=='all'?'<br>'+esc(t('emptyListClosed')):''}</div>`;
 }
 
 /* ---------- 收藏 ---------- */
@@ -1116,7 +1147,15 @@ document.addEventListener('click',e=>{
     if(rc.dataset.rec==='more'){passShown();persona();compute();recDirty=true;renderRand();window.scrollTo({top:0,behavior:'smooth'})}
     else{SA=null;LS.set('sessionQ',null);rqStep=0;SHOWN=new Set();renderRand()}
     return}
-  const ak=e.target.closest('[data-ask]'); if(ak){if(ak.dataset.ask==='go')askAgents();else{ASK=null;REC.forEach(x=>delete x.ag);renderRand()}return}
+  const ak=e.target.closest('[data-ask]'); if(ak){const [act,sc]=ak.dataset.ask.split('|');
+    if(document.activeElement&&document.activeElement.blur) document.activeElement.blur();
+    if(act==='go') askAgents(sc);
+    else{ ASK[sc]=null; if(sc==='rand') (REC||[]).forEach(x=>delete x.ag); if(act==='clear') FPICK=[]; reAsk(sc) }
+    return}
+  const ap=e.target.closest('[data-askpick]'); if(ap){const o=ap.dataset.askpick, i=FPICK.indexOf(o);
+    if(i>=0) FPICK.splice(i,1); else if(FPICK.length<5) FPICK.push(o); else toast(t('askPickMax'));
+    if(ASK.find&&ASK.find.st!=='run') ASK.find=null;  // 改了勾选：下次重新问
+    renderList(); return}
   const nr=e.target.closest('[data-nope-rec]'); if(nr){nopeRec(+nr.dataset.nopeRec);return}
   const nope=e.target.closest('[data-nope]'); if(nope){const o=nope.dataset.nope;markActed(o);const l=LS.get('nope',[]).filter(y=>Date.now()-y.at<14*DAY);l.push({oid:o,at:Date.now()});LS.set('nope',l);const pp=P.find(x=>x.oid===o);if(pp){learn(pp,'nope');toast(t('nopeToast',{name:pp.name}),()=>{LS.set('nope',LS.get('nope',[]).filter(y=>y.oid!==o));renderPanel()})}askSkip(o,true);return}
   const nt=e.target.closest('[data-night]'); if(nt){LS.set('nightAsked',new Date().toDateString());$('night-banner').hidden=true;
