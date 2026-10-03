@@ -353,3 +353,13 @@ dialog.quiz[open]{display:flex}
 .acts{gap:6px}
 #find-ask .ask-box{margin:0 0 12px}
 .ask-tip{margin:0 0 10px}
+.crit{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.crit .chip{min-height:34px;padding:5px 11px;font-size:13px}
+.need{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.need-row{display:flex;gap:8px}
+.need-row .in{flex:1;min-width:0}
+.need-row .btn{min-height:42px;white-space:nowrap}
+.need-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tagx{font-size:12.5px;padding:3px 9px;border-radius:999px;background:var(--accent-soft)}
+.stats{display:flex;gap:14px;align-items:center}
+.stats .big{font-family:var(--display);font-size:34px;font-weight:700;line-height:1}

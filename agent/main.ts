@@ -1,5 +1,6 @@
 // 「问问这几家」服务器：找饭 AI + 每家店的代建店家 AI，两边按 A2A 说话。部署在 Deno Deploy。
 //   POST /ask                                   手机调用，按行（NDJSON）逐条返回进度
+//   POST /intent                                一句话 → 这一顿的口味方向
 //   GET  /a2a/stores?near=lat,lng               附近店家 AI 的目录
 //   GET  /a2a/store/{id}/.well-known/agent-card.json   店家 AI 的名片
 //   POST /a2a/store/{id}                        店家 AI（JSON-RPC message/send）
@@ -10,10 +11,12 @@ import { answer, type Question, ruleAnswer } from "./store.ts";
 import { dataOf, message, rpcError, rpcResult, storeCard, textOf, type Message } from "./a2a.ts";
 import { type AskReq, run } from "./concierge.ts";
 import { take } from "./limits.ts";
+import { parseIntent } from "./intent.ts";
 
 const ORIGINS = (Deno.env.get("ALLOWED_ORIGINS") || "https://yyx061.github.io,http://localhost:8765").split(",");
 const DAILY_ASK = +(Deno.env.get("DAILY_ASK") || 40);
 const DAILY_STORE = +(Deno.env.get("DAILY_STORE") || 300);
+const DAILY_INTENT = +(Deno.env.get("DAILY_INTENT") || 150);
 // 以后真实餐厅有了自己的 A2A AI：在这里把店编号指向它的地址
 const REGISTRY: Record<string, string> = {};
 
@@ -69,6 +72,17 @@ async function handler(req: Request): Promise<Response> {
     const o = req.headers.get("Origin");
     if (o && !ORIGINS.includes(o)) return json(req, { error: "origin" }, 403);
     return ask(req, self);
+  }
+
+  if (path === "/intent" && req.method === "POST") {
+    const o = req.headers.get("Origin");
+    if (o && !ORIGINS.includes(o)) return json(req, { error: "origin" }, 403);
+    let b: any;
+    try { b = await req.json(); } catch { return json(req, { error: "bad json" }, 400); }
+    if (typeof b?.text !== "string" || !b.text.trim() || !Array.isArray(b.groups)) return json(req, { error: "text and groups required" }, 400);
+    if (!(await take("intent", DAILY_INTENT))) return json(req, { error: "daily_limit" }, 429);
+    try { return json(req, await parseIntent(b.text, b.lang === "en" ? "en" : "zh", b.groups.filter((g: unknown) => typeof g === "string").slice(0, 40))); }
+    catch (e) { return json(req, { error: String((e as Error)?.message || e) }, 502); }
   }
 
   const card = path.match(/^\/a2a\/store\/([^/]+)\/\.well-known\/agent(?:-card)?\.json$/);
