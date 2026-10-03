@@ -157,7 +157,7 @@ if(S.locKey===undefined){  // 旧版只存了中文名字：换成可翻译的 k
 }
 const LOCKEY={cityhall:'locCityhall',here:'locHere',pasted:'locPasted',mappick:'locMap'};
 const locLabel=()=>S.locKey?(S.locKey.startsWith('hood:')?hoodName(HOODS[+S.locKey.slice(5)]):t(LOCKEY[S.locKey])):S.locName;
-const save=()=>LS.set('state',{recN:S.recN,findN:S.findN,lat:S.lat,lng:S.lng,locName:S.locName,locKey:S.locKey,mode:S.mode,mins:S.mins,view:S.view,show:S.show,sort:S.sort,kw:S.kw,mood:S.mood,acc:S.acc,when:S.when,whenDay:S.whenDay,whenTime:S.whenTime});
+const save=()=>LS.set('state',{party:S.party,need:S.need,recN:S.recN,findN:S.findN,lat:S.lat,lng:S.lng,locName:S.locName,locKey:S.locKey,mode:S.mode,mins:S.mins,view:S.view,show:S.show,sort:S.sort,kw:S.kw,mood:S.mood,acc:S.acc,when:S.when,whenDay:S.whenDay,whenTime:S.whenTime});
 
 /* ---------- keyword library ---------- */
 const has=(p,list)=>p.cu.some(c=>list.includes(c));
@@ -539,7 +539,7 @@ function newRecs(){
   for(const c of cand){ if(out.length>=n) break; if(!taken.has(c.r.p.oid)) take(c,'other') }
   // 前三个位置按固定顺序排：稳的、换换口味、来点惊喜
   const order={safe:0,change:1,surprise:2,other:3}; out.sort((a,b)=>order[a.role]-order[b.role]);
-  REC=out; recDirty=false; out.forEach(x=>SHOWN.add(x.r.p.oid));
+  REC=out; recDirty=false; ASK=null; out.forEach(x=>SHOWN.add(x.r.p.oid));
 }
 function refreshRecs(){  // 数据刷新（每分钟、改了口味）时：店不变，只更新状态和理由
   if(!REC) return;
@@ -550,12 +550,13 @@ function recCard(x,i){
   const r=x.r, p=r.p, ohSrc=overrides[p.oid]||p.oh||'';
   const role=x.role==='other'?'roleOther':'role_'+x.role;
   const reasons=[x.why,...x.extra,...r.fit.why.filter(w=>w.good).map(w=>w.t)].filter(Boolean);
-  const reason=[...new Set(reasons)].slice(0,2).join(' · ');
+  const reason=x.ag&&x.ag.reason?x.ag.reason:[...new Set(reasons)].slice(0,2).join(' · ');
   return `<article class="rec" data-o="${esc(p.oid)}">
     <div class="rec-top"><span class="role r-${x.role}">${esc(t(role))}</span><span class="rec-walk num">${r.tm} ${esc(t('minUnit'))} · ${esc(modeL())}</span></div>
     <div class="pn">${esc(p.name)}${p.zh&&p.zh!==p.name?`<small>${esc(p.zh)}</small>`:''}</div>
     <div class="tags">${gHTML(p)}${tagHTML(p)}<span>${typeName(p.type)}</span>${priceHTML(p)}<span class="num">${distTxt(r.d)}</span></div>
-    ${reason?`<div class="reason">💡 ${esc(reason)}</div>`:''}
+    ${reason?`<div class="reason">${x.ag&&x.ag.reason?'🤖':'💡'} ${esc(reason)}</div>`:''}
+    ${agHTML(x,i)}
     ${dishHTML(p)}
     <div class="st"><span class="pill ${r.st.k}">${esc(r.st.t)}</span>${r.st.k==='unk'?`<span class="hint small">${esc(t('unkWarn'))}</span>`:''}</div>
     <div class="rec-acts">
@@ -595,8 +596,11 @@ function renderRand(){
       <div class="row"><span class="hint">${esc(t('recShow'))}</span><div class="seg" id="rec-n"></div></div>
     </div>
     ${REC.length?`<div class="rec-list">${REC.map(recCard).join('')}</div>`:`<div class="empty-pick">${esc(t(NEAR.length?'emptyMood':'emptyNear'))}</div>`}
+    ${askHTML()}
     <div class="rec-foot"><button type="button" class="btn primary" data-rec="more">${esc(t('recMore'))}</button><button type="button" class="btn ghost" data-rec="redo">${esc(t('recRedo'))}</button></div>`;
   segBtns($('rec-n'),REC_NS.map(v=>[v,String(v)]),S.recN||3,v=>{S.recN=+v;save();SHOWN=new Set();recDirty=true;renderRand()});
+  if($('ask-party')) segBtns($('ask-party'),PARTY,S.party||2,v=>{S.party=+v;save();renderRand()});
+  if($('ask-need')) $('ask-need').oninput=e=>{S.need=e.target.value;save()};
   REC.forEach(x=>gFetch(x.r.p));  // 看到的店：查 Google 评分和营业时间（有缓存、每天有上限）
 }
 function answerRQ(v){  // SA.at 有值 = 这一轮问题答完了；答到一半时 SA 里只有已答的题
@@ -627,6 +631,84 @@ function nopeRec(i){  // 「不想吃这个」：2 周内不再出现，当场�
     if(alt) SHOWN.delete(alt.p.oid); REC[i]=x; if(!alt) REC.splice(i,0,x); renderRand();
   });
   askSkip(p.oid,true);  // 顺便问一句原因（可以不理）
+}
+
+/* ---------- 问问这几家：找饭 AI 用 A2A 去问每家店的 AI（服务器在 agent/，设计见 docs/specs/2026-10-02-agent-to-agent-design.md）---------- */
+const AGENT_URL=LS.get('agentUrl','')||'';  // 服务器上线后填 Deno Deploy 的地址；空着就不显示「问问这几家」
+const PARTY=[[1,'1'],[2,'2'],[4,'3–4'],[6,'5+']];
+let ASK=null;  // {st:'run'|'done'|'err', stores:[{oid,name}], log:{oid:{text,ok}}, final, err}
+function askBody(){
+  const zh=LANG==='zh', w=startW(), list=(REC||[]).slice(0,5);
+  const cons=[];
+  if(PROF.spice===0) cons.push(zh?'不吃辣':'no spicy food');
+  if(PROF.veg) cons.push(zh?'素食':'vegetarian');
+  if(PROF.budget) cons.push(zh?`人均不超过 ${PROF.budget} 加元`:`max CA$${PROF.budget} per person`);
+  if(SA&&SA.avoid&&SA.avoid.length) cons.push((zh?'今天不想吃：':'not today: ')+SA.avoid.map(kwText).join(', '));
+  const lab=id=>kwLabel(id.replace(/^!/,''));
+  const recent=[...new Set(HIST.filter(h=>Date.now()-h.t<3*DAY).flatMap(h=>h.g||GROUPS.filter(g=>(h.cu||[]).some(c=>g.cu.includes(c))).map(g=>g.n)))].map(kwText);
+  return {lang:LANG, need:(S.need||'').trim().slice(0,200), party:S.party||2,
+    when:`${DN[Math.floor(w/1440)%7]} ${hhmm(w)}`,
+    weather:CTX.temp!=null?`${CTX.snow?(zh?'下雪 ':'snow '):CTX.wet?(zh?'下雨 ':'rain '):''}${CTX.temp}°C`:undefined,
+    constraints:cons,
+    persona:{likes:PROF.likes.filter(x=>x[0]!=='!').map(lab),dislikes:PROF.likes.filter(x=>x[0]==='!').map(lab),recent},
+    candidates:list.map(x=>{const r=x.r,p=r.p,g=GP[p.oid];
+      return {oid:p.oid,minutes:r.tm,mode:modeL(),status:r.st.t,open:r.st.left!=null?hhmm(w+r.tm+r.st.left):undefined,
+        google:g&&!g.none?{rating:g.r,count:g.n,status:g.st}:undefined,
+        notes:[...new Set([x.why,...x.extra,...r.fit.why.filter(v=>v.good).map(v=>v.t)].filter(Boolean))].slice(0,4)}})};
+}
+async function askAgents(){
+  if(!REC||!REC.length||(ASK&&ASK.st==='run')) return;
+  const body=askBody();
+  ASK={st:'run',q:body,stores:body.candidates.map(c=>({oid:c.oid,name:(P.find(p=>p.oid===c.oid)||{}).name||c.oid})),log:{},final:null};
+  renderRand();
+  try{
+    const res=await fetch(AGENT_URL+'/ask',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if(res.status===429) throw new Error('limit');
+    if(!res.ok||!res.body) throw new Error('HTTP '+res.status);
+    const rd=res.body.getReader(), dec=new TextDecoder(); let buf='';
+    for(;;){
+      const {done,value}=await rd.read(); if(done) break;
+      buf+=dec.decode(value,{stream:true});
+      let i; while((i=buf.indexOf('\n'))>=0){ const line=buf.slice(0,i).trim(); buf=buf.slice(i+1); if(line) onAskEvent(JSON.parse(line)) }
+    }
+    if(ASK.st==='run') throw new Error('no final');
+  }catch(e){ ASK.st='err'; ASK.err=String(e.message||e)==='limit'?'limit':'net'; renderRand() }
+}
+function onAskEvent(ev){
+  if(!ASK) return;
+  if(ev.type==='reply'){ ASK.log[ev.oid]={text:ev.text,ok:!!ev.answer,ans:ev.answer}; renderRand() }
+  else if(ev.type==='final'){
+    ASK.st='done'; ASK.final=ev;
+    const pos=new Map(ev.order.map((o,i)=>[o,i]));
+    REC.forEach(x=>{const o=x.r.p.oid;if(pos.has(o))x.ag={reason:ev.reasons[o]||'',ans:(ASK.log[o]||{}).ans||null,rank:pos.get(o)}});
+    REC.sort((a,b)=>(a.ag?a.ag.rank:99)-(b.ag?b.ag.rank:99));
+    renderRand();
+  }
+  else if(ev.type==='error') throw new Error(ev.error);
+}
+function askHTML(){
+  const n=Math.min(5,(REC||[]).length);
+  if(!n||!AGENT_URL) return '';
+  if(!ASK) return `<section class="ask-box">
+      <div class="ask-row"><button type="button" class="btn primary" data-ask="go">${esc(t('askBtn',{n}))}</button><span class="hint">${esc(t('askHint'))}</span></div>
+      <div class="ask-row"><span class="hint">${esc(t('askParty'))}</span><div class="seg" id="ask-party"></div></div>
+      <input class="in ask-need" id="ask-need" maxlength="200" value="${esc(S.need||'')}" placeholder="${esc(t('askNeedPh'))}">
+    </section>`;
+  const q=ASK.q, head=t('askQ',{party:q.party>=6?'5+':q.party===4?'3–4':q.party,when:q.when})+(q.need?` · 「${q.need}」`:'');
+  const rows=ASK.stores.map(s=>{const l=ASK.log[s.oid];
+    return `<li class="${l?(l.ok?'ok':'bad'):'wait'}"><b>${esc(s.name)}</b><span>${esc(l?(l.ok?l.text:t('askNoReply')):t('askWait'))}</span></li>`}).join('');
+  const foot=ASK.st==='run'?`<div class="hint">${esc(t('askRun',{n:ASK.stores.length}))}</div>`
+    :ASK.st==='err'?`<div class="hint bad-t">${esc(t(ASK.err==='limit'?'askLimit':'askErr'))}</div><button type="button" class="btn ghost" data-ask="reset">${esc(t('askAgain'))}</button>`
+    :`<div class="hint">${esc(t('askDone'))}</div><button type="button" class="btn ghost" data-ask="reset">${esc(t('askAgain'))}</button>`;
+  return `<section class="ask-box" aria-live="polite"><div class="ask-q">🤖 ${esc(head)}</div><ul class="ask-log">${rows}</ul><div class="ask-row">${foot}</div><div class="hint small">${esc(t('askBy'))}</div></section>`;
+}
+function agHTML(x,i){  // 推荐卡上：店家 AI 的回答
+  const a=x.ag&&x.ag.ans; if(!a) return '';
+  const bits=[t('seat_'+a.canSeat)];
+  if(a.waitGuess&&a.waitGuess.level!=='unknown') bits.push(t('wait_'+a.waitGuess.level)+t('waitEst'));
+  if(a.mustOrder&&a.mustOrder.length) bits.push(t('mustOrder')+a.mustOrder.map(m=>m.dish).join(LANG==='zh'?'、':', '));
+  const vs=i===0&&ASK&&ASK.final&&ASK.final.vsSecond?`<div class="ag-vs">${esc(t('vsSecond')+ASK.final.vsSecond)}</div>`:'';
+  return `<div class="ag"><div class="ag-line">${bits.map(b=>`<span>${esc(b)}</span>`).join('')}</div>${a.reservation&&a.reservation.advice?`<div class="hint small">${esc(a.reservation.advice)}</div>`:''}${vs}</div>`;
 }
 
 /* ---------- 看了但没选 / 选了：问一句为什么 ----------
@@ -1034,6 +1116,7 @@ document.addEventListener('click',e=>{
     if(rc.dataset.rec==='more'){passShown();persona();compute();recDirty=true;renderRand();window.scrollTo({top:0,behavior:'smooth'})}
     else{SA=null;LS.set('sessionQ',null);rqStep=0;SHOWN=new Set();renderRand()}
     return}
+  const ak=e.target.closest('[data-ask]'); if(ak){if(ak.dataset.ask==='go')askAgents();else{ASK=null;REC.forEach(x=>delete x.ag);renderRand()}return}
   const nr=e.target.closest('[data-nope-rec]'); if(nr){nopeRec(+nr.dataset.nopeRec);return}
   const nope=e.target.closest('[data-nope]'); if(nope){const o=nope.dataset.nope;markActed(o);const l=LS.get('nope',[]).filter(y=>Date.now()-y.at<14*DAY);l.push({oid:o,at:Date.now()});LS.set('nope',l);const pp=P.find(x=>x.oid===o);if(pp){learn(pp,'nope');toast(t('nopeToast',{name:pp.name}),()=>{LS.set('nope',LS.get('nope',[]).filter(y=>y.oid!==o));renderPanel()})}askSkip(o,true);return}
   const nt=e.target.closest('[data-night]'); if(nt){LS.set('nightAsked',new Date().toDateString());$('night-banner').hidden=true;
