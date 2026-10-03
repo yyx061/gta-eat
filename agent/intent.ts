@@ -2,21 +2,21 @@
 
 import { askJSON } from "./llm.ts";
 
-export const ATTRS = ["soup", "spicy", "light", "fried", "sweet", "cheap", "treat", "near", "quick", "sit", "late"] as const;
+export const ATTRS = ["soup", "rice", "dumpling", "fried", "grill", "spicy", "hotpot", "raw", "light", "handheld", "pizza", "sweet", "drink", "breakfast", "cheap", "treat", "near", "quick", "sit", "late"] as const;
 
 export type Intent = { attrs: Record<string, number>; gPlus: string[]; gMinus: string[]; summary: string };
 
 const SYS = {
   zh: `把顾客说的一句「想吃什么」拆成口味方向，给推荐排序用。
 方向（每个 -1 到 1，0 或不写表示没提到；只写顾客明确或强烈暗示的）：
-soup 热汤/热乎, spicy 辣, light 清淡/健康, fried 油炸/油腻, sweet 甜品/饮品, cheap 便宜, treat 吃顿好的/犒劳, near 别走太远, quick 快/赶时间, sit 坐下慢慢吃/聊天, late 夜宵。
+soup 热汤/汤面/热乎, rice 米饭/盖饭, dumpling 饺子包子点心, fried 油炸/油腻, grill 烧烤烤肉, spicy 辣, hotpot 火锅, raw 寿司刺身生鲜, light 清淡/健康/沙拉, handheld 汉堡三明治卷饼, pizza 披萨, sweet 甜品, drink 奶茶咖啡饮品, breakfast 早餐, cheap 便宜, treat 吃顿好的/犒劳, near 别走太远, quick 快/赶时间, sit 坐下慢慢吃/聊天, late 夜宵。
 「别太油」→ fried:-1；「不想吃辣」→ spicy:-1；「累了想吃点舒服的」→ soup:0.6, near:0.5。
 gPlus / gMinus：顾客明确想吃 / 不想吃的菜系，只能从给定的菜系列表里选原样的名字。
 summary：用 3–8 个字概括这一顿，例如「热乎、不油、近」。
 只输出 JSON：{"attrs":{},"gPlus":[],"gMinus":[],"summary":""}`,
   en: `Turn the diner's one-line craving into taste directions for ranking.
 Directions (each -1 to 1; 0 or omitted = not mentioned; only what they said or strongly implied):
-soup warm/soupy, spicy, light healthy, fried greasy, sweet dessert/drinks, cheap, treat splurge, near not far, quick in a hurry, sit sit-down/chat, late late-night.
+soup warm/noodle soup, rice rice dishes, dumpling dumplings/dim sum, fried greasy, grill bbq, spicy, hotpot, raw sushi/sashimi, light healthy/salad, handheld burgers/sandwiches/wraps, pizza, sweet dessert, drink coffee/boba, breakfast, cheap, treat splurge, near not far, quick in a hurry, sit sit-down/chat, late late-night.
 "not too greasy" → fried:-1; "no spicy" → spicy:-1; "tired, want comfort food" → soup:0.6, near:0.5.
 gPlus / gMinus: cuisines they explicitly want / don't want, copied exactly from the given list.
 summary: 2–5 words, e.g. "warm, not greasy, close".

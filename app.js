@@ -313,6 +313,59 @@ function ctxLine(){  // 「随便吃」上方的一句场合说明
   return parts.join(' · ');
 }
 
+/* ---------- 场合学习：「场合 × 馋点标签」的权重表（SPEC 第 5 节）----------
+   场合 = 工作日/周末 × 时段，再加下雨、冷、热、周五晚。每一格是一个带不确定性的权重 {m 平均, v 不确定度, n 次数}。
+   一开始用原来的场合规则和问卷里的场合题打底；吃了、点导航、二选一选中会加强，换掉、不想吃会减弱。
+   找一家用平均值（列表稳定）；随便吃按不确定度抽样（汤普森采样），数据少的格子偶尔试一试。 */
+const ctxFeats=()=>{const c=CTX,f=[c.key];if(c.wet||c.snow)f.push('wet');if(c.cold)f.push('cold');if(c.hot)f.push('hot');if(c.friNight)f.push('fri');return f};
+let CPRIOR=null;
+function ctxPrior(){
+  if(CPRIOR) return CPRIOR;
+  const pref=PROF.ctx||{}, P={}, put=(f,k,m)=>{(P[f]||(P[f]={}))[k]=m};
+  const rain=pref.rain==='hotpot'?'hotpot':'soup'; put('wet',rain,1.5); put('cold',rain,1.2);
+  ['sweet','drink','light'].forEach(k=>put('hot',k,1));
+  ['wd:breakfast','we:breakfast'].forEach(f=>{put(f,'breakfast',1.5);put(f,'drink',1)});
+  ['wd:afternoon','we:afternoon'].forEach(f=>{put(f,'sweet',1);put(f,'drink',1)});
+  put('wd:lunch',pref.lunch==='sit'?'sit':'quick',1);
+  if(pref.fri==='bold'){put('fri','spicy',1.5);put('fri','grill',1.5)} else put('fri','sit',1);
+  ['wd:late','we:late'].forEach(f=>put(f,'late',1));
+  return CPRIOR=P;
+}
+const cmS=()=>PROF.cm||(PROF.cm={});  // 每次现取：导入备份会换掉 PROF.cm
+(function cmDrift(){  // 很久没数据的格子慢慢变回「不确定」，口味变了也能重新学
+  const days=(Date.now()-(PROF.cmAt||Date.now()))/DAY;
+  if(days>=1) {const CM=cmS();for(const f in CM) for(const k in CM[f]) CM[f][k].v=Math.min(0.5,CM[f][k].v+0.003*days)}
+  PROF.cmAt=Date.now();
+})();
+function cell(f,k){ const CM=cmS(), c=CM[f]&&CM[f][k]; if(c) return c; const pm=(ctxPrior()[f]||{})[k]; return {m:pm||0,v:pm?0.4:0.3,n:0} }
+let CSAMP=new Map();  // 这一批推荐的抽样，换一批时清空
+function ctxScore(p,sample){
+  let s=0; const T=[...tagsOf(p)]; if(lateNight(p)) T.push('late');
+  for(const f of ctxFeats()) for(const k of T){
+    const c=cell(f,k); if(!c.m&&!sample) continue;
+    if(sample){ const key=f+'|'+k; if(!CSAMP.has(key)) CSAMP.set(key,c.m+Math.sqrt(c.v)*randn()*0.7); s+=CSAMP.get(key) } else s+=c.m;
+  }
+  return Math.max(-3,Math.min(3,s));
+}
+function ctxBest(p){  // 学出来的、对这家贡献最大的一格（用来写理由）
+  let best=null; const T=[...tagsOf(p)], CM=cmS();
+  for(const f of ctxFeats()) for(const k of T){ const c=CM[f]&&CM[f][k]; if(c&&c.n>=3&&c.m>=1&&(!best||c.m>best.m)) best={f,k,m:c.m} }
+  return best;
+}
+function ctxUpdate(f,k,y){  // 证据累加：越有把握，每次改得越少
+  const CM=cmS(), c=CM[f]&&CM[f][k]?CM[f][k]:((CM[f]||(CM[f]={}))[k]=cell(f,k));
+  const lr=c.v/(c.v+0.5); c.m=Math.max(-3,Math.min(3,c.m+lr*y)); c.v=Math.max(0.05,c.v*0.5/(c.v+0.5)*1.6); c.n++;
+}
+function ctxLearn(p,y,loser){  // 一家店在当前场合下的反馈；loser：二选一里没选的那家
+  if(!p||!CTX.key) return;
+  const T=tagsOf(p), L=loser?tagsOf(loser):null;
+  for(const f of ctxFeats()){
+    for(const k of T) if(!L||!L.has(k)) ctxUpdate(f,k,y);
+    if(L) for(const k of L) if(!T.has(k)) ctxUpdate(f,k,-0.75*y);
+  }
+  saveProf();
+}
+function ctxLearnTag(k,y){ if(!CTX.key||k==='near') return; for(const f of ctxFeats()) ctxUpdate(f,k,y); saveProf() }
 const agoTxt=d=>t(d<1?'ago0':d<2?'ago1':'ago2');
 function taste(p,d=0){  // {s:分数, why:[{t:原因, good:true/false}]}
   const why=[]; let s=0;
@@ -337,7 +390,9 @@ function taste(p,d=0){  // {s:分数, why:[{t:原因, good:true/false}]}
   if(rs!=null){s-=2.5;why.push({t:t('whyRecent',{ago:agoTxt(rs)}),good:false})}
   else if(p.cu.some(c=>PER.recentCu[c])){s-=1;why.push({t:t('whyRecentCu'),good:false})}
   // 场合
-  const [cb,cr]=ctxBoost(p,d); if(cb){s+=cb;if(cr)why.push({t:cr,good:true})}
+  const cm=ctxScore(p,false), [,cr]=ctxBoost(p,d); s+=cm;
+  if((CTX.wet||CTX.cold||CTX.snow)&&maxDist()>0) s+=0.5*Math.max(0,1-d/maxDist());  // 天不好，近的加一点
+  if(cm>0.5){ const lb=ctxBest(p); if(cr) why.push({t:cr,good:true}); else if(lb) why.push({t:t('ctxLearned',{when:t('ctxF_'+(lb.f.includes(':')?lb.f.replace(':','_'):lb.f)),x:t('attr_'+lb.k)}),good:true}) }
   const hb=PER.habit[CTX.key]; let habitHit=false; if(hb&&p.cu.some(c=>hb[c]>=2)){habitHit=true;s+=1;why.push({t:t('ctxHabit',{slot:t('slot_'+CTX.slot+(CTX.weekday?'':'_we'))}),good:true})}
   // 「没选这家」的回答
   if(PER.tmpNo.some(x=>x.key===CTX.key&&x.cu.some(c=>p.cu.includes(c)))){s-=2;why.push({t:t('whyTmpNo'),good:false})}
@@ -425,7 +480,7 @@ function renderControls(){
 
 /* ---------- 随便吃：先问两个「当下」的问题，再给 N 张推荐卡（稳的 / 换换口味 / 来点惊喜 / 另一个选择）----------
    长期口味来自口味问卷、Uber 导入和「吃过了」；这里的问题只管这一顿。算法见 SPEC.md 第 5 节。 */
-const RQ=[['hunger',['snack','meal','treat']],['taste',['light','bold','soup','new','any']],['avoid',null]];  // 第 3 题：今天想吃（want）/ 不想吃（avoid）的菜系，三态点选，可以不选
+const RQ=[['hunger',['snack','meal','treat']],['pair',null]];  // 第 2 步是二选一（2–3 轮）；想吃 / 不想吃的菜系挪到结果页顶部，可以不点
 const REC_NS=[3,5,7,10,15,20];
 let SA=LS.get('sessionQ',null); if(!SA||Date.now()-SA.at>3*3600e3) SA=null;  // 3 小时内的回答还算数
 let rqStep=0, REC=null, recDirty=true, SHOWN=new Set(), lateOnly=false;
@@ -445,25 +500,46 @@ const TREAT=['steak_house','steak','sushi','izakaya','french','italian','seafood
 // 口味方向：「像这个，但…」按钮、一句话需求、以后的学习模型都用这一套
 const FRIED=['fried_chicken','chicken','wings','fries','fish_and_chips','burger','hot_dog','poutine'];
 const SWEET=['dessert','ice_cream','cake','donut','pastry','bakery','crepe','frozen_yogurt','gelato','waffle','bubble_tea'];
-const ATTR={
-  soup:p=>kwIs('想吃点:热汤面',p),
-  spicy:p=>p.cu.some(c=>SPICY_CU.includes(c)),
-  light:p=>p.cu.some(c=>TASTE_MAP.light.plus.includes(c))&&!p.cu.some(c=>TASTE_MAP.light.minus.includes(c)),
-  fried:p=>p.cu.some(c=>FRIED.includes(c)),
-  sweet:p=>p.type===2||p.cu.some(c=>SWEET.includes(c)),
-  cheap:p=>p.price?p.price.max<=20:(p.type===1||p.type===3),
-  treat:p=>p.type===0&&(p.cu.some(c=>TREAT.includes(c))||!!(p.price&&p.price.min>=35)),
-  quick:p=>p.type===1||p.type===3,
-  sit:p=>p.type===0,
-  late:p=>lateNight(p),
-  near:null,  // 按距离算，不是店的属性
+// 馋点标签：比菜系更细的「想吃的东西」。从菜系、招牌菜、店名、类型、价格、营业时间推出来，第一次用到时算好存在 p._t
+const TAG_RULES={
+  soup:[['ramen','noodle','noodles','pho','udon','soup','congee','hotpot','hot_pot'],/拉面|汤|粉|米线|面馆|麻辣烫|粥|ramen|pho\b|soup|noodle|udon|laksa|congee|broth|hot ?pot/],
+  rice:[['donburi','poke','bowl','filipino','hakka','cantonese'],/饭|丼|咖喱|\brice\b(?! ?(noodle|vermicelli|roll|paper))|bowl|biryani|bibimbap|curry|donburi/],
+  dumpling:[['dim_sum','dumpling','dumplings'],/饺|包子|点心|小笼|dumpling|\bbao\b|dim sum|momo|gyoza|xiao ?long/],
+  fried:[FRIED,/炸|fried|crispy|tempura|katsu|karaage|wings/],
+  grill:[['barbecue','bbq','korean_bbq','kebab','shawarma','grill','steak_house','steak','brazilian','bar_and_grill'],/烤|串|bbq|grill|skewer|yakitori|kebab|shawarma|churrasc/],
+  spicy:[SPICY_CU,/辣|麻|spicy|sichuan|szechuan|hot chicken|jerk|vindaloo|mala/],
+  hotpot:[['hotpot','hot_pot'],/火锅|hot ?pot|shabu/],
+  raw:[['sushi','poke'],/寿司|刺身|sushi|sashimi|poke|ceviche|omakase/],
+  light:[['salad','juice','healthy','poke','vegan','vegetarian','smoothie'],/沙拉|轻食|salad|healthy|green|vegan/],
+  handheld:[['burger','sandwich','sub','hot_dog','tacos','banh_mi','bagel','pita','shawarma','falafel'],/汉堡|三明治|burger|sandwich|taco|wrap|banh mi|\bsub\b|burrito/],
+  pizza:[['pizza'],/披萨|pizza/],
+  sweet:[SWEET,/甜品|蛋糕|冰淇淋|dessert|cake|gelato|ice cream|donut|waffle|crepe|patisserie/],
+  drink:[['bubble_tea','tea','coffee_shop','coffee','juice','smoothie'],/奶茶|咖啡|bubble tea|boba|coffee|caf[eé]\b|espresso/],
+  breakfast:[['breakfast','brunch','bagel','pancake','diner'],/早餐|早午餐|breakfast|brunch/],
 };
+const cuLabel=p=>{const c=p.cu.find(x=>ZH[x]);return c?cz(c):typeName(p.type)};  // 没有翻译的菜系（如 hawaiian）就说店的类型
+function tagsOf(p){
+  if(p._t) return p._t;
+  const T=new Set(), txt=[p.name,p.zh,...(p.dish?p.dish.d.flat():[])].join(' ').toLowerCase();
+  for(const k in TAG_RULES){const [cu,re]=TAG_RULES[k]; if(p.cu.some(c=>cu.includes(c))||re.test(txt)) T.add(k)}
+  if(p.type===2) T.add('drink');
+  if(T.has('light')&&p.cu.some(c=>TASTE_MAP.light.minus.includes(c))) T.delete('light');
+  if(TASTE_MAP.light.plus.some(c=>p.cu.includes(c))&&!T.has('fried')) T.add('light');
+  if(p.type===1||p.type===3) T.add('quick'); else if(p.type===0) T.add('sit');
+  if(p.price?p.price.max<=20:(p.type===1||p.type===3)) T.add('cheap');
+  if(p.type===0&&(p.cu.some(c=>TREAT.includes(c))||(p.price&&p.price.min>=35))) T.add('treat');
+  return p._t=T;
+}
+const hasTag=(p,k)=>k==='late'?lateNight(p):tagsOf(p).has(k);  // 「开得晚」跟时间有关，不缓存
+const TAG_KEYS=[...Object.keys(TAG_RULES),'quick','sit','cheap','treat','late'];
+// 口味方向 = 馋点标签 + 「近」（按距离算）
+const ATTR={}; TAG_KEYS.forEach(k=>{ATTR[k]=p=>hasTag(p,k)}); ATTR.near=null;
 const ATTR_KEYS=Object.keys(ATTR);
 function intentWhy(r){  // 符合这一顿方向时的具体理由：方向 + 菜名或菜系 + 几分钟
   const it=SA&&SA.intent; if(!it) return '';
   const p=r.p, hit=ATTR_KEYS.filter(k=>k!=='near'&&(it.attrs||{})[k]>0&&ATTR[k](p));
   if(!hit.length&&!(it.gPlus||[]).some(g=>groupsOf(p).includes(g))) return '';
-  const d=p.dish&&p.dish.d.length?(LANG==='zh'?p.dish.d[0][0]:p.dish.d[0][1]||p.dish.d[0][0]):cz(p.cu[0]||'')||typeName(p.type);
+  const d=p.dish&&p.dish.d.length?(LANG==='zh'?p.dish.d[0][0]:p.dish.d[0][1]||p.dish.d[0][0]):cuLabel(p);
   const lab=hit.length?t('attr_'+hit[0]):kwText(groupsOf(p).find(g=>it.gPlus.includes(g)));
   const no=(it.attrs||{}).fried<0&&!ATTR.fried(p)?t('attrNoFried'):'';
   return t('intentWhy',{a:lab,x:d,n:r.tm})+no;
@@ -477,8 +553,9 @@ function intentScore(r){  // 这一顿的方向（一句话 + 点过的「像这
   if(gs.some(g=>(it.gMinus||[]).includes(g))) s-=4;
   return s;
 }
-function setIntent(fn){  // 改这一顿的方向；SA 没有就新建（等于跳过了问题）
-  if(!SA||!SA.at){SA=Object.assign(SA||{},{at:Date.now()});rqStep=RQ.length}
+function setIntent(fn,inQuestions){  // 改这一顿的方向；SA 没有就新建（等于跳过了问题）。二选一还在问的时候不结束问题
+  if(!SA) SA={};
+  if(!SA.at&&!inQuestions){SA.at=Date.now();rqStep=RQ.length}
   const it=SA.intent||(SA.intent={attrs:{},gPlus:[],gMinus:[],tags:[]});
   fn(it); LS.set('sessionQ',SA);
 }
@@ -541,6 +618,7 @@ function recScore(r,samp){  // 在现有口味分（喜欢、评分、场合、U
     const hg=h.g||(h.g=GROUPS.filter(g=>(h.cu||[]).some(c=>g.cu.includes(c))).map(g=>g.n));
     if(hg.some(g=>gs.includes(g))) s-=1.5*Math.pow(0.5,age/3)*(isNew?2:1);
   }
+  s+=ctxScore(p,true)-ctxScore(p,false); // 场合学习：随便吃按不确定度抽样
   const is=intentScore(r); s+=is;        // 这一顿的方向
   if(is>0){const w=intentWhy(r); if(w) extra.unshift(w)}
   s-=0.05*r.tm;                          // 距离
@@ -548,6 +626,7 @@ function recScore(r,samp){  // 在现有口味分（喜欢、评分、场合、U
   return {s,extra};
 }
 function newRecs(){
+  CSAMP=new Map();
   const n=S.recN||3, isNew=SA&&SA.taste==='new', k=isNew?3:1.5, bd=PROF.bandit||{}, samp={};
   for(const g of GROUPS) samp[g.n]=betaS((bd[g.n]||{a:1}).a,(bd[g.n]||{b:1}).b)*k;
   samp._none=betaS(1,1)*k;
@@ -623,13 +702,12 @@ function renderRand(){
   if(document.activeElement&&['ask-need-rand','need-in'].includes(document.activeElement.id)&&!intentBusy) return;  // 正在打字：不重画
   if((!SA||!SA.at)&&rqStep<RQ.length){  // 当下的问题：一屏一题，可以跳过或直接推荐
     const [q,opts]=RQ[rqStep];
+    if(q==='pair'){ if(!PAIR) startPair(); if(PAIR) box.innerHTML=pairHTML(); return }  // 没有能比的店时 startPair 会直接结束问题
     box.innerHTML=`<div class="rq">
       <div class="rq-top"><span class="num rq-step">${rqStep+1} / ${RQ.length}</span><button type="button" class="linkbtn" data-rq="direct">${esc(t('rqDirect'))}</button></div>
       <h2>${esc(t('rq_'+q))}</h2>
-      ${opts?`<div class="rq-opts">${opts.map(o=>`<button type="button" class="rq-opt" data-rq="${q}|${o}">${esc(t('rq_'+q+'_'+o))}</button>`).join('')}</div>
-      <button type="button" class="linkbtn" data-rq="skip">${esc(t('qzSkip'))}</button>`
-      :`<p class="hint">${t('tapHint')}</p><div class="chips">${GROUPS.map(g=>{const st=((SA&&SA.want)||[]).includes(g.n)?'yes':((SA&&SA.avoid)||[]).includes(g.n)?'no':'';return `<button type="button" class="chip" data-rq-avoid="${esc(g.n)}" aria-pressed="${st==='yes'}" data-st="${st}">${esc(kwText(g.n))}</button>`}).join('')}</div>
-      <button type="button" class="btn primary rq-go" data-rq="skip">${esc(t(((SA&&SA.avoid)||[]).length||((SA&&SA.want)||[]).length?'rqAvoidGo':'rqAvoidNone'))}</button>`}
+      <div class="rq-opts">${opts.map(o=>`<button type="button" class="rq-opt" data-rq="${q}|${o}">${esc(t('rq_'+q+'_'+o))}</button>`).join('')}</div>
+      <button type="button" class="linkbtn" data-rq="skip">${esc(t('qzSkip'))}</button>
     </div>`;
     return;
   }
@@ -639,6 +717,7 @@ function renderRand(){
       <div class="ctx-line">${esc(ctxLine())}${ans?` · ${esc(ans)}`:''}${lateOnly?` · 🌙`:''}</div>
       <div class="row"><span class="hint">${esc(t('recShow'))}</span><div class="seg" id="rec-n"></div></div>
       ${needHTML()}
+      ${waHTML()}
     </div>
     ${REC.length?`<div class="rec-list">${REC.map(recCard).join('')}</div>`:`<div class="empty-pick">${esc(t(NEAR.length?'emptyMood':'emptyNear'))}</div>`}
     ${askHTML('rand')}
@@ -657,14 +736,14 @@ function answerRQ(v){  // SA.at 有值 = 这一轮问题答完了；答到一半
 }
 function passShown(){  // 「换一批」：这批里没选的，算轻微的「不想吃」，1 天内不再出现
   const l=LS.get('pass',[]).filter(x=>Date.now()-x.at<DAY);
-  for(const x of REC||[]){ if(x.acted) continue; learn(x.r.p,'pass'); l.push({oid:x.r.p.oid,at:Date.now()}) }
+  for(const x of REC||[]){ if(x.acted) continue; learn(x.r.p,'pass'); ctxLearn(x.r.p,-0.1); l.push({oid:x.r.p.oid,at:Date.now()}) }
   LS.set('pass',l);
 }
 function nopeRec(i){  // 「不想吃这个」：2 周内不再出现，当场换一张，提示里可以撤销
   const x=REC[i]; if(!x) return;
   const p=x.r.p, l=LS.get('nope',[]).filter(y=>Date.now()-y.at<14*DAY); l.push({oid:p.oid,at:Date.now()}); LS.set('nope',l);
   const before={w:JSON.stringify(PROF.w||{}),b:JSON.stringify(PROF.bandit||{})};
-  learn(p,'nope'); persona(); compute();
+  learn(p,'nope'); ctxLearn(p,-0.6); persona(); compute();
   const cand=recCandidates().filter(r=>!REC.some(y=>y.r.p.oid===r.p.oid));
   const used=new Set(REC.filter((_,j)=>j!==i).flatMap(y=>groupsOf(y.r.p)));
   const alt=cand.find(r=>groupsOf(r.p).every(g=>!used.has(g)))||cand[0];
@@ -677,6 +756,95 @@ function nopeRec(i){  // 「不想吃这个」：2 周内不再出现，当场�
   });
   askSkip(p.oid,true);  // 顺便问一句原因（可以不理）
 }
+
+/* ---------- 二选一：给两家附近真的开着的店，挑你最拿不准的方向来比；最多 3 轮，够确定了就提前结束 ---------- */
+const PAIR_SKIP=new Set(['late','quick','sit']);  // 这些跟店的类型、时间有关，不拿来比
+const MEAL_TAGS=['soup','rice','dumpling','fried','grill','hotpot','raw','handheld','pizza','spicy','breakfast'];
+const PAIR_W=k=>MEAL_TAGS.includes(k)?1:0.5;   // 优先比「吃什么」，其次才是便宜、清淡这些
+const mealish=p=>{const T=tagsOf(p);return p.type!==2&&(MEAL_TAGS.some(k=>T.has(k))||!(T.has('sweet')||T.has('drink')))};
+let PAIR=null;  // {round, a, b, asked:{tag:次数}, seen:Set}
+function pairUnc(k){  // 这个方向还有多拿不准：这一顿已经很明确的、已经比过的，就少比
+  const v=Math.abs(((SA&&SA.intent&&SA.intent.attrs)||{})[k]||0), n=(PAIR&&PAIR.asked[k])||0;
+  return 1/(1+3*v)/(1+n);
+}
+function pickPair(){
+  const samp={}; for(const g of GROUPS) samp[g.n]=0; samp._none=0;
+  const seen=PAIR.seen;
+  const snack=SA&&SA.hunger==='snack';
+  const pool=recCandidates().filter(r=>!seen.has(r.p.oid)&&(snack||mealish(r.p))&&(r.st.k==='ok'||r.st.k==='tight'))
+    .map(r=>({r,s:recScore(r,samp).s,T:tagsOf(r.p),g:groupsOf(r.p)})).sort((a,b)=>b.s-a.s).slice(0,14);
+  let best=null;
+  for(let i=0;i<pool.length;i++) for(let j=i+1;j<pool.length;j++){
+    const a=pool[i], b=pool[j];
+    if(a.g.length&&b.g.length&&a.g.some(g=>b.g.includes(g))) continue;  // 同一个菜系没什么好比的
+    const diff=[...a.T].filter(k=>!b.T.has(k)&&!PAIR_SKIP.has(k)).concat([...b.T].filter(k=>!a.T.has(k)&&!PAIR_SKIP.has(k)));
+    if(!diff.length) continue;
+    const v=diff.reduce((x,k)=>x+pairUnc(k)*PAIR_W(k),0)+0.15*(a.s+b.s)-0.05*Math.abs(a.r.tm-b.r.tm);
+    if(!best||v>best.v) best={a,b,v,diff};
+  }
+  return best;
+}
+function startPair(){ PAIR={round:0,asked:{},seen:new Set()}; nextPair() }
+function nextPair(){
+  const pr=PAIR.round<3?pickPair():null;
+  if(!pr){ finishPair(); return }
+  PAIR.a=pr.a; PAIR.b=pr.b; PAIR.diff=pr.diff; PAIR.round++;
+  pr.diff.forEach(k=>PAIR.asked[k]=(PAIR.asked[k]||0)+1); PAIR.seen.add(pr.a.r.p.oid); PAIR.seen.add(pr.b.r.p.oid);
+}
+function answerPair(v){  // v：a / b / none / skip
+  const {a,b}=PAIR;
+  if(v==='a'||v==='b'){
+    const [w,l]=v==='a'?[a,b]:[b,a];
+    setIntent(it=>{
+      for(const k of w.T) if(!l.T.has(k)&&k!=='late') it.attrs[k]=Math.min(1,(it.attrs[k]||0)+0.5);
+      for(const k of l.T) if(!w.T.has(k)&&k!=='late') it.attrs[k]=Math.max(-1,(it.attrs[k]||0)-0.4);
+    },true);
+    ctxLearn(w.r.p,0.4,l.r.p);
+    const L=LS.get('pairLog',[]); L.push({w:w.r.p.oid,l:l.r.p.oid,ctx:CTX.key,at:Date.now()}); LS.set('pairLog',L.slice(-300));
+  } else if(v==='none'){
+    setIntent(it=>{ for(const k of new Set([...a.T,...b.T])) if(!PAIR_SKIP.has(k)) it.attrs[k]=Math.max(-1,(it.attrs[k]||0)-0.25) },true);
+    ctxLearn(a.r.p,-0.2); ctxLearn(b.r.p,-0.2);
+  }
+  if(v==='skip'){ finishPair(); return }
+  // 够确定了就不再问：已经有一个方向很明确，而且至少问了 2 轮
+  const top=Math.max(0,...Object.values((SA.intent||{}).attrs||{}).map(Math.abs));
+  if(PAIR.round>=2&&top>=0.8) finishPair(); else { nextPair(); renderRand() }
+}
+function finishPair(){
+  if(SA&&SA.intent){  // 这一顿的方向显示成几个字：最明确的两个
+    const at=SA.intent.attrs, top=Object.keys(at).filter(k=>at[k]>=0.4&&k!=='near').sort((x,y)=>at[y]-at[x]).slice(0,2);
+    const no=Object.keys(at).filter(k=>at[k]<=-0.4).sort((x,y)=>at[x]-at[y]).slice(0,1);
+    const lab=[...top.map(k=>t('attr_'+k)),...no.map(k=>t('notX',{x:t('attr_'+k)}))].join(LANG==='zh'?'、':', ');
+    SA.intent.tags=SA.intent.tags.filter(x=>!x.startsWith('⚖️'));
+    if(lab) SA.intent.tags.unshift('⚖️ '+lab);
+  }
+  PAIR=null; answerRQ('skip');
+}
+function pairSide(x,side){
+  const p=x.r.p, d=p.dish&&p.dish.d.length?(LANG==='zh'?p.dish.d[0][0]:p.dish.d[0][1]||p.dish.d[0][0]):'';
+  const own=PAIR.diff.filter(k=>x.T.has(k)).slice(0,3);
+  return `<button type="button" class="pair-opt" data-pair="${side}">
+    <span class="pair-tags">${own.map(k=>`<span>${esc(t('attr_'+k))}</span>`).join('')}</span>
+    <b>${esc(p.zh&&LANG==='zh'?p.zh:p.name)}</b>
+    <span class="hint">${esc([d,cuLabel(p)].filter(Boolean).join(' · '))}</span>
+    <span class="num hint">${x.r.tm} ${esc(t('minUnit'))} · ${esc(modeL())}</span>
+  </button>`;
+}
+function pairHTML(){
+  return `<div class="rq">
+    <div class="rq-top"><span class="num rq-step">${t('pairStep',{n:PAIR.round})}</span><button type="button" class="linkbtn" data-pair="skip">${esc(t('rqDirect'))}</button></div>
+    <h2>${esc(t('pairQ'))}</h2>
+    <div class="pair">${pairSide(PAIR.a,'a')}<span class="pair-or">${esc(t('pairOr'))}</span>${pairSide(PAIR.b,'b')}</div>
+    <button type="button" class="linkbtn" data-pair="none">${esc(t('pairNone'))}</button>
+  </div>`;
+}
+function waHTML(){  // 结果页顶部：想吃 / 不想吃的菜系（以前是第 3 题）
+  const w=(SA&&SA.want)||[], a=(SA&&SA.avoid)||[];
+  const sum=[w.length&&t('rqWantSum',{x:w.map(kwText).join(LANG==='zh'?'、':', ')}),a.length&&t('rqAvoidSum',{x:a.map(kwText).join(LANG==='zh'?'、':', ')})].filter(Boolean).join(' · ');
+  return `<details class="wa"${waOpen?' open':''}><summary>${esc(t('waSum'))}${sum?` <span class="hint">· ${esc(sum)}</span>`:''}</summary>
+    <p class="hint">${t('tapHint')}</p><div class="chips">${GROUPS.map(g=>{const st=w.includes(g.n)?'yes':a.includes(g.n)?'no':'';return `<button type="button" class="chip" data-rq-avoid="${esc(g.n)}" aria-pressed="${st==='yes'}" data-st="${st}">${esc(kwText(g.n))}</button>`}).join('')}</div></details>`;
+}
+let waOpen=false;
 
 /* ---------- 像这个，但…（评价式推荐）：点一个方向，这张卡换成往那个方向走的店，这一顿后面的推荐也跟着变 ---------- */
 const CRIT=['near','cheap','light','spicy','soup','other'];
@@ -691,7 +859,7 @@ function critOk(k,c,b){  // c 是否比 b 更符合方向 k
   return ATTR[CRIT_ATTR[k]](cp);
 }
 function critWhy(k,c,b){
-  const p=c.r.p, x=p.dish&&p.dish.d.length?(LANG==='zh'?p.dish.d[0][0]:p.dish.d[0][1]||p.dish.d[0][0]):cz(p.cu[0]||'')||typeName(p.type);
+  const p=c.r.p, x=p.dish&&p.dish.d.length?(LANG==='zh'?p.dish.d[0][0]:p.dish.d[0][1]||p.dish.d[0][0]):cuLabel(p);
   if(k==='near') return t('critWhy_near',{n:c.r.tm,d:b.r.tm-c.r.tm});
   if(k==='cheap') return p.price?t('critWhy_cheapP',{min:p.price.min,max:p.price.max}):t('critWhy_cheap',{x:typeName(p.type)});
   if(k==='other') return t('critWhy_other',{x:c.g.length?kwText(c.g[0]):x});
@@ -707,6 +875,7 @@ function critique(i,k){
     const tag=t('crit_'+k); if(!it.tags.includes(tag)) it.tags.push(tag);
   });
   learn(bp,'pass'); markActed(bp.oid);
+  if(k==='other') ctxLearn(bp,-0.3); else if(k!=='near') ctxLearnTag(CRIT_ATTR[k],0.4);
   const log=LS.get('crit',[]); log.push({oid:bp.oid,k,ctx:CTX.key,at:Date.now()}); LS.set('crit',log.slice(-300));
   const k1=1.5, bd=PROF.bandit||{}, samp={};
   for(const g of GROUPS) samp[g.n]=betaS((bd[g.n]||{a:1}).a,(bd[g.n]||{b:1}).b)*k1;
@@ -725,7 +894,7 @@ const critHTML=i=>`<div class="crit"><span class="hint small">${esc(t('critLab')
 const LOCAL_INTENT=[[/汤|热乎|暖|soup|warm|broth/i,'soup',1],[/辣|spicy|hot pot|麻/i,'spicy',1],[/不辣|别辣|not spicy|no spice/i,'spicy',-1],
   [/清淡|轻|不油|健康|light|healthy|fresh/i,'light',1],[/油炸|炸|fried|greasy/i,'fried',1],[/不.{0,2}油|别.{0,2}油|not greasy/i,'fried',-1],
   [/甜|dessert|sweet/i,'sweet',1],[/便宜|省钱|cheap|budget/i,'cheap',1],[/好的|犒劳|大餐|庆祝|treat|fancy|celebrat/i,'treat',1],
-  [/近|别走太远|nearby|close/i,'near',1],[/快|赶时间|quick|fast|hurry/i,'quick',1],[/坐下|聊天|慢慢|sit|chat|date/i,'sit',1],[/夜宵|宵夜|late/i,'late',1]];
+  [/近|别走太远|nearby|close/i,'near',1],[/米饭|盖饭|rice/i,'rice',1],[/饺|包子|点心|dumpling|dim sum/i,'dumpling',1],[/烧烤|烤肉|bbq|grill/i,'grill',1],[/火锅|hot ?pot/i,'hotpot',1],[/寿司|刺身|sushi/i,'raw',1],[/汉堡|三明治|burger|sandwich/i,'handheld',1],[/披萨|pizza/i,'pizza',1],[/奶茶|咖啡|coffee|boba/i,'drink',1],[/早餐|breakfast/i,'breakfast',1],[/快|赶时间|quick|fast|hurry/i,'quick',1],[/坐下|聊天|慢慢|sit|chat|date/i,'sit',1],[/夜宵|宵夜|late/i,'late',1]];
 function localIntent(text){
   const attrs={}; for(const [re,k,v] of LOCAL_INTENT) if(re.test(text)) attrs[k]=v;
   const gPlus=GROUPS.filter(g=>text.includes(g.n)||text.toLowerCase().includes(kwText(g.n).toLowerCase())).map(g=>g.n);
@@ -743,6 +912,7 @@ async function applyNeed(){
   }catch(e){ r=localIntent(text) }
   intentBusy=false;
   const L=LS.get('intentLog',[]); L.push({text,at:Date.now(),ctx:CTX.key,attrs:r.attrs}); LS.set('intentLog',L.slice(-200));
+  for(const k in r.attrs||{}) if(ATTR[k]&&+r.attrs[k]) ctxLearnTag(k,0.5*Math.max(-1,Math.min(1,+r.attrs[k])));  // 在这种场合说想吃什么：很强的信号
   setIntent(it=>{
     it.attrs={}; for(const k of ATTR_KEYS){const v=+((r.attrs||{})[k]||0); if(v) it.attrs[k]=Math.max(-1,Math.min(1,v))}
     const ok=g=>GROUPS.some(x=>x.n===g);
@@ -1101,13 +1271,13 @@ function renderMe(){
     <span class="seg hrate">${RATE.map(([v,l])=>`<button type="button" data-hrate="${h.t}|${v}" aria-pressed="${h.r===v}">${esc(t(l))}</button>`).join('')}</span>
     <button type="button" class="linkbtn" data-hdel="${h.t}" title="${esc(t('delTitle'))}">${esc(t('del'))}</button></div>`}).join(''):`<div class="empty">${esc(t('meHistEmpty'))}</div>`;
 }
-function profChanged(){saveProf();persona();if(personalized()&&!LS.get('fitSortSet',false)){S.sort='fit';save();LS.set('fitSortSet',true);renderControls()}renderMe();compute();renderFav()}
+function profChanged(){CPRIOR=null;saveProf();persona();if(personalized()&&!LS.get('fitSortSet',false)){S.sort='fit';save();LS.set('fitSortSet',true);renderControls()}renderMe();compute();renderFav()}
 function histChanged(){saveHist();persona();profChanged()}
 function ate(oid,r){
   const p=P.find(x=>x.oid===oid); if(!p) return;
   const last=HIST.find(h=>h.oid===oid&&Date.now()-h.t<12*3600e3);  // 12 小时内同一家算同一顿
   if(last) last.r=r; else HIST.push({oid,name:p.name,cu:p.cu,t:Date.now(),r,ctx:CTX.key});  // ctx：当时的场合，用来学习「什么场合吃什么」
-  learn(p,r===-1?'nope':'ate');
+  learn(p,r===-1?'nope':'ate'); ctxLearn(p,r===1?1:r===-1?-1:0.5);
   (REC||[]).forEach(x=>{if(x.r.p.oid===oid)x.acted=true});
   markActed(oid);
   histChanged(); toast(t(r===1?'toastGood':r===-1?'toastBad':'toastOk'));
@@ -1293,12 +1463,14 @@ document.addEventListener('click',e=>{
   const sg=e.target.closest('[data-sug]'); if(sg){useAddr(sugs[+sg.dataset.sug]);return}
   const rl=e.target.closest('[data-rl]'); if(rl){const r=LS.get('recentLocs',[])[+rl.dataset.rl];if(r)useAddr({main:r.n,lat:r.lat,lng:r.lng});return}
   const k=e.target.closest('[data-k]'); if(k){toggleKW(k.dataset.k);return}
-  const ra=e.target.closest('[data-rq-avoid]'); if(ra){if(!SA||SA.at)SA={};const w=SA.want||(SA.want=[]),a=SA.avoid||(SA.avoid=[]),g=ra.dataset.rqAvoid,wi=w.indexOf(g),ai=a.indexOf(g);
-    if(wi>=0){w.splice(wi,1);a.push(g)}else if(ai>=0)a.splice(ai,1);else w.push(g);renderRand();return}  // 没选 → 想吃 → 不想吃 → 没选
+  const ra=e.target.closest('[data-rq-avoid]'); if(ra){if(!SA){SA={at:Date.now()};rqStep=RQ.length}const w=SA.want||(SA.want=[]),a=SA.avoid||(SA.avoid=[]),g=ra.dataset.rqAvoid,wi=w.indexOf(g),ai=a.indexOf(g);
+    if(wi>=0){w.splice(wi,1);a.push(g)}else if(ai>=0)a.splice(ai,1);else w.push(g);  // 没选 → 想吃 → 不想吃 → 没选
+    waOpen=true; LS.set('sessionQ',SA); SHOWN=new Set(); recDirty=true; compute(); renderRand(); return}
+  const pa=e.target.closest('[data-pair]'); if(pa){ if(pa.dataset.pair==='skip') finishPair(); else answerPair(pa.dataset.pair); return }
   const rq=e.target.closest('[data-rq]'); if(rq){answerRQ(rq.dataset.rq);return}
   const rc=e.target.closest('[data-rec]'); if(rc){
     if(rc.dataset.rec==='more'){passShown();persona();compute();recDirty=true;renderRand();window.scrollTo({top:0,behavior:'smooth'})}
-    else{SA=null;LS.set('sessionQ',null);rqStep=0;SHOWN=new Set();renderRand()}
+    else{SA=null;PAIR=null;LS.set('sessionQ',null);rqStep=0;SHOWN=new Set();renderRand()}
     return}
   const cr=e.target.closest('[data-crit]'); if(cr){const [i,k]=cr.dataset.crit.split('|');critique(+i,k);return}
   const nd=e.target.closest('[data-need]'); if(nd){ if(document.activeElement&&document.activeElement.blur) document.activeElement.blur();
@@ -1318,7 +1490,7 @@ document.addEventListener('click',e=>{
     if(nt.dataset.night==='go'){lateOnly=true;SHOWN=new Set();recDirty=true;setView('rand')}return}
   const sk=e.target.closest('[data-skip]'); if(sk){answerSkip(sk.dataset.skip,sk.closest('.skip-ask'));return}
   const wp=e.target.closest('[data-whypick]'); if(wp){answerWhyPick(wp.dataset.whypick,wp.closest('.skip-ask'));return}
-  const nav=e.target.closest('[data-nav]'); if(nav){const o=nav.dataset.nav;markActed(o);{const L=LS.get('navLog',[]);L.push({oid:o,at:Date.now()});LS.set('navLog',L.slice(-300))}const p=P.find(x=>x.oid===o);if(p){LS.set('pending',{oid:p.oid,name:p.name,t:Date.now()});setTimeout(()=>askWhyPick(o),300)}return}
+  const nav=e.target.closest('[data-nav]'); if(nav){const o=nav.dataset.nav;markActed(o);{const L=LS.get('navLog',[]);L.push({oid:o,at:Date.now()});LS.set('navLog',L.slice(-300));ctxLearn(P.find(x=>x.oid===o),0.5)}const p=P.find(x=>x.oid===o);if(p){LS.set('pending',{oid:p.oid,name:p.name,t:Date.now()});setTimeout(()=>askWhyPick(o),300)}return}
   const at=e.target.closest('[data-ate]'); if(at){askRate(at,at.dataset.ate);return}
   const rt=e.target.closest('[data-rate]'); if(rt){const [o,v]=rt.dataset.rate.split('|');ate(o,+v);const pd=LS.get('pending',null);if(pd&&pd.oid===o)LS.set('pending',null);checkPending();rt.closest('.rateask')?.replaceWith(Object.assign(document.createElement('span'),{className:'rated',textContent:t('rated')}));renderPanel();if(+v!==-1)askWhyPick(o);return}
   if(e.target.closest('[data-pending-no]')){LS.set('pending',null);checkPending();return}
