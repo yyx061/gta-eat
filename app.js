@@ -611,6 +611,7 @@ function recScore(r,samp){  // 在现有口味分（喜欢、评分、场合、U
     if(m){ if(p.cu.some(c=>m.plus.includes(c))){s+=2;extra.push(t('ans_'+SA.taste))} else if(p.cu.some(c=>m.minus.includes(c))) s-=2 }
     if(SA.hunger==='treat'&&p.cu.some(c=>TREAT.includes(c))){s+=2;extra.push(t('ans_treat'))}
     if(SA.hunger==='meal'&&p.type===0) s+=1;
+    if((SA.hunger==='meal'||SA.hunger==='treat')&&!mealish(p)) s-=3;  // 想正经吃：咖啡、甜品、饮品店往后放
   }
   for(const h of HIST){  // 最近吃过：同一菜系组 7 天内按时间衰减扣分；同一家 3 天内重扣
     const age=(now-h.t)/DAY; if(age>7) continue;
